@@ -30,7 +30,7 @@ flowchart TD
     E(["Total Subnet Emissions per Block: E"]):::emission
     E -->|18%| V["Validators<br/>Benchmark execution & scoring"]:::validator
     E -->|82%| M["Miners<br/>Workflow policy design"]:::miner
-    M --> R["Miner Reward Formula<br/>R_i = (E × 0.82) × (W_i / Σ W_j)"]:::formula
+    M --> R["Miner Reward Formula<br/>R_i = (E × 0.82) × (W_i / Σ_j W_j)"]:::formula
     R --> W["W_i = Stake-weighted score for miner i<br/>across all active validators"]:::formula
 
     classDef emission fill:#1e3a5f,stroke:#3b82f6,color:#fff
@@ -38,6 +38,14 @@ flowchart TD
     classDef miner   fill:#b45309,stroke:#fcd34d,color:#fff
     classDef formula fill:#065f46,stroke:#6ee7b7,color:#fff
 ```
+| Variable | Unit      | Definition                                                               |
+| -------- | --------- | ------------------------------------------------------------------------ |
+| R_i  | TAO       | Reward allocated to miner i per block                                    |
+| E      | TAO/block | Total subnet emissions per block — split 18% validators, 82% miners      |
+| W_i  | float     | Stake-weighted score for miner i across all evaluating validators        |
+| W_j  | float     | Score for all miners j — denominator that normalizes the weight fraction |
+| i      | int       | Index variable pointing to the specific miner receiving rewards          |
+| j      | int       | Iterator over all active miners in the summation denominator             |
 
 Unlike winner-takes-all models, C-SWON uses a proportional emission system. This rewards a broader spectrum of high-quality miners, encourages diverse workflow strategies, and avoids centralization of rewards around a single dominant approach.
 
