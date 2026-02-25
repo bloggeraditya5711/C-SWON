@@ -25,15 +25,18 @@ The incentive mechanism of C-SWON is engineered to reward genuine orchestration 
 
 C-SWON follows Bittensor's standard Yuma consensus for emission distribution, with a split that reflects the relative roles of miners and validators:
 
-```
-Total Subnet Emissions per Block: E
+```mermaid
+flowchart TD
+    E(["Total Subnet Emissions per Block: E"]):::emission
+    E -->|18%| V["Validators<br/>Benchmark execution & scoring"]:::validator
+    E -->|82%| M["Miners<br/>Workflow policy design"]:::miner
+    M --> R["Miner Reward Formula<br/>R_i = (E × 0.82) × (W_i / Σ W_j)"]:::formula
+    R --> W["W_i = Stake-weighted score for miner i<br/>across all active validators"]:::formula
 
-├─ 18% → Validators  (for benchmark execution and scoring)
-└─ 82% → Miners      (for workflow policy design)
-
-Miner reward:  R_i = (E × 0.82) × (W_i / Σ W_j)
-
-Where W_i = stake-weighted score for miner i across all active validators
+    classDef emission fill:#1e3a5f,stroke:#3b82f6,color:#fff
+    classDef validator fill:#1d4ed8,stroke:#93c5fd,color:#fff
+    classDef miner   fill:#b45309,stroke:#fcd34d,color:#fff
+    classDef formula fill:#065f46,stroke:#6ee7b7,color:#fff
 ```
 
 Unlike winner-takes-all models, C-SWON uses a proportional emission system. This rewards a broader spectrum of high-quality miners, encourages diverse workflow strategies, and avoids centralization of rewards around a single dominant approach.
@@ -306,72 +309,62 @@ Split:
 
 ### High-Level Architecture
 
-```
-┌─────────────────────── Application Layer ─────────────────────────┐
-│   AI Agents (Targon, Nous)   Web3 Apps   Enterprise (SDK/API)     │
-└────────────────────────────────┬──────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────── C-SWON API Gateway ────────────────────────┐
-│   get_optimal_workflow(task, constraints)                          │
-│   execute_workflow(plan)   ·   monitor_execution(workflow_id)      │
-└────────────────────────────────┬──────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────── C-SWON Subnet Layer ───────────────────────┐
-│                                                                    │
-│  ┌─────────────────────────────────────────────────────────┐     │
-│  │  Validators (5–20)                                       │     │
-│  │  · Publish benchmark tasks                              │     │
-│  │  · Execute workflows in sandbox                         │     │
-│  │  · Score on success / cost / latency / reliability      │     │
-│  │  · Submit weight vectors to Subtensor                   │     │
-│  └──────────────────────────┬──────────────────────────────┘     │
-│                             │  Task Queries                        │
-│                             ▼                                      │
-│  ┌─────────────────────────────────────────────────────────┐     │
-│  │  Miners (30–100)                                         │     │
-│  │  · Receive task + constraints                           │     │
-│  │  · Design optimal workflow DAG                          │     │
-│  │  · Select subnets, estimate cost/latency                │     │
-│  │  · Return executable workflow plan                      │     │
-│  └──────────────────────────┬──────────────────────────────┘     │
-│                             │  Workflow Plans                      │
-│                             ▼                                      │
-│  ┌─────────────────────────────────────────────────────────┐     │
-│  │  Subtensor (Blockchain Layer)                            │     │
-│  │  · Neuron registry · Weight submissions · TAO emissions  │     │
-│  └─────────────────────────────────────────────────────────┘     │
-└────────────────────────────────┬──────────────────────────────────┘
-                                 │  Workflow Executes Calls To:
-                                 ▼
-┌──────────────── Bittensor Subnet Ecosystem ────────────────────────┐
-│   SN1 (Text)  ·  SN62 (Code Review)  ·  SN64 (Inference)          │
-│   SN45 (Testing)  ·  SN70 (Fact Check)  ·  100+ more subnets      │
-└────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph APP["Application Layer"]
+        A["AI Agents (Targon, Nous) · Web3 Apps · Enterprise SDK/API"]
+    end
+
+    subgraph GW["C-SWON API Gateway"]
+        G["get_optimal_workflow(task, constraints)<br/>execute_workflow(plan)  ·  monitor_execution(workflow_id)"]
+    end
+
+    subgraph SL["C-SWON Subnet Layer"]
+        V["Validators (5–20)<br/>· Publish benchmark tasks<br/>· Execute workflows in sandbox <br/>· Score: success / cost / latency / reliability<br/>· Submit weight vectors to Subtensor"]
+        M["Miners (30–100)<br/>· Receive task + constraints<br/>· Design optimal workflow DAG<br/>· Select subnets, estimate cost/latency<br/>· Return executable workflow plan"]
+        S["Subtensor — Blockchain Layer<br/>· Neuron registry  · Weight submissions  · TAO emissions"]
+
+        V -->|Task Queries| M
+        M -->|Workflow Plans| S
+    end
+
+    subgraph ECO["Bittensor Subnet Ecosystem"]
+        E["SN1 (Text) · SN62 (Code Review) · SN64 (Inference)<br/>SN45 (Testing) · SN70 (Fact Check) · 100+ more subnets"]
+    end
+
+    APP --> GW
+    GW --> SL
+    SL -->|Workflow Executes Calls To| ECO
+
+    style APP fill:#4c1d95,stroke:#7c3aed,color:#fff
+    style GW  fill:#0c4a6e,stroke:#0ea5e9,color:#fff
+    style SL  fill:#1e3a5f,stroke:#3b82f6,color:#fff
+    style ECO fill:#14532d,stroke:#22c55e,color:#fff
+
+    style A fill:#6d28d9,stroke:#a78bfa,color:#fff
+    style G fill:#075985,stroke:#38bdf8,color:#fff
+    style V fill:#1d4ed8,stroke:#93c5fd,color:#fff
+    style M fill:#b45309,stroke:#fcd34d,color:#fff
+    style S fill:#0f172a,stroke:#64748b,color:#fff
+    style E fill:#166534,stroke:#4ade80,color:#fff
 ```
 
 ### Validation Cycle Detail
 
-```
-Validator                              Miner Pool
-    │                                       │
-    │  1. Task Package                      │
-    ├──► Goal, Quality Criteria,  ──────────►
-    │    Budget, Latency Limits             │  2. Workflow Plans
-    │                                  ◄────┤  (DAGs with subnet
-    │                                       │   routing + fallbacks)
-    │  3. Sandboxed Execution               │
-    │   · Call specified subnets            │
-    │   · Track actual cost + latency       │
-    │   · Monitor retries + failures        │
-    │                                       │
-    │  4. Composite Score                   │
-    │   Success(50%) + Cost(25%)            │
-    │   + Latency(15%) + Reliability(10%)   │
-    │                                       │
-    ▼                                       ▼
-TAO Emissions (Validator Stake)      TAO Rewards (Yuma Consensus)
+```mermaid
+sequenceDiagram
+    participant V as Validator
+    participant M as Miner Pool
+
+    V->>M: 1. Task Package (Goal, Quality Criteria, Budget, Latency Limits)
+    M-->>V: 2. Workflow Plans (DAGs with subnet routing + fallbacks)
+
+    Note over V: 3. Sandboxed Execution<br/>· Call specified subnets<br/>· Track actual cost + latency<br/>· Monitor retries + failures
+
+    Note over V: 4. Composite Score<br/>Success (50%) + Cost (25%) + Latency (15%) + Reliability (10%)
+
+    Note over V: ✅ TAO Emissions (Validator Stake)
+    Note over M: ✅ TAO Rewards (Yuma Consensus)
 ```
 
 ### Risk Register
