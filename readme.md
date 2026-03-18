@@ -3,7 +3,7 @@
 **Bittensor Subnet Proposal**
 *"Zapier for Subnets" - The Intelligence Layer for Multi-Subnet Composition*
 
-> **GitHub:** [https://github.com/adysingh5711/C-SWON](https://github.com/adysingh5711/C-SWON) · **Whitepaper:** Upcoming
+> **GitHub:** https://github.com/adysingh5711/C-SWON · **Whitepaper:** Upcoming
 
 ---
 
@@ -19,38 +19,61 @@ The result is an intelligent routing layer that turns any complex AI task into a
 
 ## 2. Incentive & Mechanism Design
 
-The incentive mechanism of C-SWON is engineered to reward genuine orchestration intelligence-not raw output quality, but the quality of the *coordination strategy* used to produce it. Miners are rewarded for designing workflow policies that generalize across diverse tasks and remain efficient under real-world constraints.
+The incentive mechanism of C-SWON is engineered to reward genuine orchestration intelligence - not raw output quality, but the quality of the *coordination strategy* used to produce it.
 
-### Emission and Reward Logic
+### 2.1 Emission Structure (dTAO Standard)
 
-C-SWON follows Bittensor's standard Yuma consensus for emission distribution, with a split that reflects the relative roles of miners and validators:
+C-SWON operates under Bittensor's Dynamic TAO (dTAO) model. All participant rewards are paid in **CSWON Alpha tokens**, not TAO directly. TAO is injected into the subnet's AMM liquidity pool each block, and Alpha is distributed to participants via Yuma Consensus each epoch (~360 blocks / ~72 minutes).
+
+**Alpha emission split per block:**
 
 ```mermaid
 flowchart TD
-    E(["Total Subnet Emissions per Block: E"]):::emission
-    E -->|18%| V["Validators<br/>Benchmark execution & scoring"]:::validator
-    E -->|82%| M["Miners<br/>Workflow policy design"]:::miner
-    M --> R["Miner Reward Formula<br/>R_i = (E × 0.82) × (W_i / Σ_j W_j)"]:::formula
-    R --> W["W_i = Stake-weighted score for miner i<br/>across all active validators"]:::formula
+    E(["Total Alpha Emissions per Block: Δα"]):::emission
+
+    E -->|18%| O["Subnet Owner<br/>Protocol dev + treasury"]:::owner
+    E -->|41%| M["Miners<br/>Workflow policy scores via Yuma"]:::miner
+    E -->|41%| VS["Validators + Stakers<br/>Scoring quality + stake delegation"]:::validator
+
+    O -->|5% of owner cut → Execution Reserve| ER["Validator Execution Reserve<br/>Subsidises sandbox TAO costs"]:::reserve
+
+    VS --> VT["Validator take"]:::vt
+    VS --> SD["Staker dividends (Alpha or TAO via AMM swap)"]:::sd
+
+    M --> RF["Miner Reward Formula<br/>R_i = (Δα × 0.41) × (W_i / Σ_j W_j)"]:::formula
+    RF --> WF["W_i = Yuma stake-weighted score<br/>S = 0.50·success + 0.25·cost + 0.15·latency + 0.10·reliability"]:::formula
 
     classDef emission fill:#1e3a5f,stroke:#3b82f6,color:#fff
-    classDef validator fill:#1d4ed8,stroke:#93c5fd,color:#fff
+    classDef owner   fill:#4c1d95,stroke:#a78bfa,color:#fff
     classDef miner   fill:#b45309,stroke:#fcd34d,color:#fff
+    classDef validator fill:#1d4ed8,stroke:#93c5fd,color:#fff
+    classDef reserve fill:#065f46,stroke:#6ee7b7,color:#fff
+    classDef vt      fill:#0c4a6e,stroke:#0ea5e9,color:#fff
+    classDef sd      fill:#0c4a6e,stroke:#0ea5e9,color:#fff
     classDef formula fill:#065f46,stroke:#6ee7b7,color:#fff
 ```
 
-| Variable | Unit      | Definition                                                                |
-| -------- | --------- | ------------------------------------------------------------------------- |
-| R_i      | TAO       | Reward allocated to miner i per block                                     |
-| E        | TAO/block | Total subnet emissions per block — split 18% validators, 82% miners      |
-| W_i      | float     | Stake-weighted score for miner i across all evaluating validators         |
-| W_j      | float     | Score for all miners j — denominator that normalizes the weight fraction |
-| i        | int       | Index variable pointing to the specific miner receiving rewards           |
-| j        | int       | Iterator over all active miners in the summation denominator              |
+| Variable | Unit         | Definition |
+|----------|--------------|------------|
+| Δα       | Alpha/block  | Total Alpha allocated to participants per block |
+| R_i      | Alpha        | Reward to miner i per epoch |
+| W_i      | float [0,1]  | Yuma stake-weighted composite score for miner i |
+| W_j      | float [0,1]  | Score for miner j — normalisation denominator |
 
-Unlike winner-takes-all models, C-SWON uses a proportional emission system. This rewards a broader spectrum of high-quality miners, encourages diverse workflow strategies, and avoids centralization of rewards around a single dominant approach.
+**Note on TAO liquidity:** TAO is injected into the C-SWON AMM pool at each block proportionally to Alpha injection to keep the Alpha price stable. Stakers who hold TAO on the root subnet receive a portion of validator dividends converted to TAO via this AMM swap. This means the subnet's AMM pool deepens with usage, creating organic liquidity without requiring external market-making.
 
-### Scoring Formula
+**Note on halving:** Alpha participant rewards (miners, validators, owner) are subject to an Alpha halving when total CSWON Alpha issuance hits a predetermined supply threshold. TAO pool injections halve at Bittensor-wide TAO halving events but Alpha participant rewards remain constant during TAO halvings.
+
+### 2.2 Validator Execution Reserve
+
+Validators execute miner-submitted workflows in a sandboxed environment, which involves making real calls to partner subnets (SN1, SN62, SN45, etc.) that cost TAO. To ensure validator solvency is not a participation barrier:
+
+- **5% of the owner's 18% cut** is held in a protocol-controlled Validator Execution Reserve each epoch.
+- Validators who complete ≥ N_min benchmark tasks per epoch (threshold published in `validator/config.py`) claim a pro-rata subsidy from this reserve.
+- **Testnet / early mainnet:** Validators use mock execution against a local subnet simulator — no real TAO is burned. Mock mode is toggled via `CSWON_MOCK_EXEC=true`.
+- **Long-term:** Phase 3 workflow fees (see Section 5) replace the reserve as the primary validator cost offset.
+
+### 2.3 Scoring Formula
 
 Every workflow a miner submits is executed in a sandboxed environment by validators. A composite score **S ∈ [0, 1]** is computed across four dimensions:
 
@@ -58,59 +81,66 @@ Every workflow a miner submits is executed in a sandboxed environment by validat
 S = 0.50 × S_success + 0.25 × S_cost + 0.15 × S_latency + 0.10 × S_reliability
 ```
 
-| Dimension                 | Weight | What It Measures                                                                      |
-| ------------------------- | ------ | ------------------------------------------------------------------------------------- |
-| **Task Success**    | 50%    | Does the workflow output meet all defined quality criteria?                           |
-| **Cost Efficiency** | 25%    | Actual TAO spent vs. the task's budget constraint*(only rewarded if success > 0.7)* |
-| **Latency**         | 15%    | Total execution time vs. the task's latency constraint                                |
-| **Reliability**     | 10%    | Penalizes excessive retries, timeouts, and hard failures                              |
+**Sub-dimension formulas (explicit):**
 
-The **success-first gating** on cost is a deliberate design choice: a workflow that fails the task cannot be considered "good" regardless of how cheap or fast it is. This enforces the correct priority ordering and prevents cheap-but-wrong strategies from earning rewards.
+```
+S_success   = output_quality_score × completion_ratio
+              where completion_ratio = steps_completed / total_steps_in_dag
 
-Scores are aggregated over a rolling 100-task window per miner using exponential decay (recent performance weighted more heavily), then normalized and capped at 15% per miner before weight submission.
+S_cost      = max(0, 1 - actual_tao / max_budget_tao)
+              only scored when S_success > 0.7; else S_cost = 0
 
-### Incentive Alignment
+S_latency   = max(0, 1 - actual_seconds / max_latency_seconds)
+              only scored when S_success > 0.7; else S_latency = 0
 
-**For Miners**, the scoring formula creates four simultaneous optimization pressures: maximize task success rate, minimize TAO expenditure on successful workflows, reduce end-to-end latency, and build robust error handling. Miners that invest in profiling subnets, building reusable workflow templates, and adapting to benchmark evolution will consistently outperform static or hardcoded approaches.
+S_reliability = max(0, 1 - (retries × 0.10 + timeouts × 0.20 + hard_failures × 0.50))
+              applied regardless of success gate
+```
 
-**For Validators**, emissions and stake delegation are tied directly to the quality of their benchmarks and scoring. Validators maintaining richer, more diverse benchmark suites produce better-calibrated miners, and higher-quality miners increase subnet value, which in turn increases validator returns. This creates a natural incentive to invest in evaluation infrastructure rather than coast on minimal effort.
+**Partial DAG completion:** If a 4-step workflow completes 3 steps before a hard failure, `completion_ratio = 0.75`. This prevents miners from designing workflows that always succeed on step 1 but silently skip subsequent steps.
 
-### Anti-Gaming Mechanisms
+**Success-first gating** on cost and latency enforces correct priority ordering: a workflow that fails the task cannot be considered "good" regardless of how cheap or fast it is. Reliability is always scored because error handling quality is independent of whether the task ultimately succeeds.
 
-Several layers of defense protect the scoring integrity:
+Scores are aggregated over a rolling 100-task window per miner using exponential decay (λ = 0.95 per task, recent performance weighted more heavily), normalised, and capped at 15% per miner before weight submission.
 
-- **Synthetic Ground Truth Tasks (15–20%):** Validators inject tasks with known optimal workflows. Miners cannot distinguish these from real tasks, making hardcoded or cached responses immediately detectable.
+### 2.4 Incentive Alignment
+
+**For Miners:** The scoring formula creates four simultaneous optimisation pressures: maximise task success rate, minimise TAO expenditure on successful workflows, reduce end-to-end latency, and build robust error handling. Miners that invest in profiling subnets, building reusable workflow templates, and adapting to benchmark evolution will consistently outperform static or hardcoded approaches.
+
+**For Validators:** Alpha emissions and stake delegation are tied directly to the quality of their benchmarks and scoring. Validators maintaining richer, more diverse benchmark suites produce better-calibrated miners, and higher-quality miners increase subnet Alpha demand — which in turn raises all validators' token value. This creates a natural incentive to invest in evaluation infrastructure.
+
+**For Stakers:** Staking CSWON Alpha gives proportionally higher validator weight than TAO root-staking (100% vs 18% weight multiplier). As Alpha supply grows relative to TAO, stakers who hold CSWON Alpha capture a larger share of emissions, incentivising long-term liquidity provision in the subnet pool.
+
+### 2.5 Anti-Gaming Mechanisms
+
+- **Synthetic Ground Truth Tasks (15–20%):** Validators inject tasks with known optimal workflows. Miners cannot distinguish these from real tasks.
 - **Multi-Validator Consensus:** The same task is sent to multiple validators. Systematic scoring divergence flags both dishonest miners and faulty validators.
-- **Dynamic Benchmark Rotation:** Validators regularly introduce new task categories. Older tasks are deprecated once widespread solutions emerge, preventing benchmark overfitting.
-- **Execution Sandboxing:** Validators execute all workflows in isolated environments, monitoring actual subnet calls and real TAO flows. Miners cannot fake execution results or misreport costs.
-- **Temporal Consistency Checks:** Sudden unexplained performance jumps are flagged for review, preventing coordinated strategy-switching or collusion attacks.
-
-### Qualification as Proof of Intelligence
-
-C-SWON's mined commodity-orchestration policy-represents a genuine and non-trivial planning problem:
-
-1. **Non-trivial optimization:** Designing a multi-subnet DAG requires reasoning about each subnet's capabilities, costs, latency profiles, and failure modes simultaneously. No simple heuristic dominates all task categories.
-2. **Continuous adaptation required:** Subnet performance changes over time, new subnets launch, and benchmark tasks evolve. Static policies decay; miners must engage in active learning and strategy refinement.
-3. **Diverse task space:** Validators test across code pipelines, RAG workflows, multi-step agent tasks, and data transformation chains. Winning miners must generalize, not memorize.
-4. **Verifiable but hard to game:** Real execution with sandboxing and synthetic tasks ensures that scores reflect genuine policy quality, not gaming sophistication.
-
-### Novelty of the Mechanism Design
-
-C-SWON introduces three original elements to the Bittensor incentive design space:
-
-- **Meta-routing as the economic primitive.** Miners compete to discover the best *coordination rules over other subnets*-which subnet to call, in what order, under what constraints, and with what fallbacks. Rewards are tied to global coordination performance, not local response quality. This is a new class of proof-of-intelligence where the object of competition is a *policy over models*, not a model itself.
-- **Multi-objective, constraint-aware scoring baked into emissions.** The scoring function internalizes four conflicting objectives into a single composite that gates rewards. This directly incentivizes Pareto-efficient workflows that hit quality targets *and* respect real-world budget and latency constraints, making emission rewards an economic signal for "production-ready" orchestration, not just correctness in isolation.
-- **Reusable workflow strategies as the unit of competition.** C-SWON rewards policies that generalize - "generate → review → test," "retrieve → reason → fact-check", rather than one-off task solutions. Miners invest in building reusable orchestration templates, and the subnet effectively becomes a market for coordination patterns that can be plugged into many upstream applications.
+- **Dynamic Benchmark Rotation:** Validators regularly introduce new task categories. Older tasks are deprecated once widespread solutions emerge.
+- **Execution Sandboxing:** Validators execute all workflows in isolated environments, monitoring actual subnet calls and real TAO flows.
+- **Temporal Consistency Checks:** Sudden unexplained performance jumps are flagged for review.
+- **Completion Ratio Enforcement:** The `completion_ratio` formula prevents DAG shortcutting — submitting a single-step workflow for a multi-step task always results in a proportionally penalised score.
 
 ---
 
 ## 3. Miner Design
 
-The role of the miner in C-SWON is to act as a workflow architect: given a task description and resource constraints, produce an optimal multi-subnet execution plan that reliably accomplishes the goal. Miners are the primary source of orchestration intelligence in the network and compete across a continuously evolving benchmark of real-world AI tasks.
+The role of the miner in C-SWON is to act as a workflow architect: given a task description and resource constraints, produce an optimal multi-subnet execution plan that reliably accomplishes the goal.
 
-### Miner Tasks
+### 3.1 Registration Requirements
 
-The miner's core task is **workflow policy design**. Given a structured task package from a validator, the miner returns an executable DAG describing which subnets to call, in what order, with what parameters, and how to handle failures.
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| TAO stake   | 1 TAO   | 10 TAO      |
+| CPU         | 4 cores | 8 cores     |
+| RAM         | 16 GB   | 32 GB       |
+| Network     | 100 Mbps| 1 Gbps      |
+| Uptime SLA  | 90%     | 99%         |
+
+Miners below 1 TAO stake cannot register. Miners falling below 90% uptime over a rolling 500-block window are deweighted proportionally in Yuma scoring.
+
+### 3.2 Miner Tasks
+
+The miner's core task is **workflow policy design**. Given a structured task package from a validator, the miner returns an executable DAG.
 
 **Input (Task Package from Validator):**
 
@@ -175,72 +205,232 @@ The miner's core task is **workflow policy design**. Given a structured task pac
   "total_estimated_cost": 0.0072,
   "total_estimated_latency": 4.3,
   "confidence": 0.88,
-  "reasoning": "Sequential pipeline: generate → review → test. SN1 for generation, SN62 for QA, SN45 for test coverage."
+  "reasoning": "Sequential pipeline: generate → review → test."
 }
 ```
 
-### Performance Dimensions
+### 3.3 Performance Dimensions
 
-Miners are evaluated across four axes, which together determine reward weights:
+| Dimension           | Weight | Formula |
+|---------------------|--------|---------|
+| Task Success        | 50%    | `output_quality × completion_ratio` |
+| Cost Efficiency     | 25%    | `max(0, 1 - actual/budget)` gated at S_success > 0.7 |
+| Latency             | 15%    | `max(0, 1 - actual_s/max_s)` gated at S_success > 0.7 |
+| Reliability         | 10%    | `max(0, 1 - retries×0.1 - timeouts×0.2 - failures×0.5)` |
 
-| Dimension                 | Weight | How It Is Measured                                                                  |
-| ------------------------- | ------ | ----------------------------------------------------------------------------------- |
-| **Task Success**    | 50%    | Does the final workflow output satisfy all defined quality criteria?                |
-| **Cost Efficiency** | 25%    | Actual TAO spent vs. the budget constraint*(gated: only scored if success > 0.7)* |
-| **Latency**         | 15%    | Total wall-clock execution time vs. the target latency                              |
-| **Reliability**     | 10%    | Penalty per retry, timeout, and hard failure in the execution trace                 |
+Three additional dimensions are tracked but not yet weighted in emissions:
+- **Creativity:** Novel subnet combinations not in baseline workflows
+- **Robustness:** Score consistency across semantically similar tasks
+- **Explainability:** Quality of the `reasoning` field
 
-Three additional dimensions are tracked but not yet weighted in emissions, they serve as signals for future scoring evolution:
+### 3.4 Miner Development Lifecycle
 
-- **Creativity:** Novel subnet combinations not observed in baseline workflows
-- **Robustness:** Consistency of performance across semantically similar tasks
-- **Explainability:** Quality and coherence of the `reasoning` field returned with each plan
-
-### Miner Development Lifecycle
-
-1. **Profile Subnets:** Gather historical cost, latency, and reliability data for available subnets to inform routing decisions.
+1. **Profile Subnets:** Gather historical cost, latency, and reliability data for available subnets. Refresh every 100 blocks via the metagraph.
 2. **Build Workflow Templates:** Develop reusable DAG patterns for common task categories (code pipelines, RAG queries, agent tasks, data transforms).
-3. **Optimize for Constraints:** Implement cost and latency optimization passes-substitute cheaper subnets when over budget, parallelize independent steps when over latency target.
+3. **Optimise for Constraints:** Implement cost and latency passes — substitute cheaper subnets when over budget, parallelise independent steps when over latency target.
 4. **Deploy and Monitor:** Serve the workflow planner via a Bittensor axon. Track scores on the public dashboard and iterate based on benchmark performance.
 
 ---
 
 ## 4. Validator Design
 
-Validators in C-SWON are the arbiters of orchestration quality. Their role is to define challenging tasks, execute submitted workflow plans in a controlled environment, measure real outcomes, and translate those measurements into honest on-chain weights. The credibility of the entire subnet depends on the rigor and fairness of this process.
+Validators define challenging tasks, execute submitted workflow plans in a sandboxed environment, measure real outcomes, and translate those measurements into honest
+on-chain weights.
 
-### Scoring and Evaluation Methodology
+### 4.1 Subnet Call Authentication
+
+When a validator executes a miner's workflow, each DAG step calls a partner subnet (e.g., SN1, SN62). Authentication works as follows:
+
+| Stage     | Authentication Model |
+|-----------|---------------------|
+| Testnet   | Mock execution against local subnet simulator (`CSWON_MOCK_EXEC=true`). No real calls, no TAO burned. |
+| Mainnet bootstrap | C-SWON registers a designated validator hotkey on each partner subnet. Calls are made at the partner subnet's standard rates, subsidised by the Validator Execution Reserve. |
+| Mainnet at scale  | Negotiated API-tier access with high-traffic partner subnets (SN1, SN64). Revenue-share agreements (5% of C-SWON workflow fees routed to partner subnet) replace per-call costs. |
+
+All subnet calls made during sandboxed execution are logged with actual TAO consumed. Validators cannot fake execution results — every call produces a verifiable on-chain
+receipt from the target subnet.
+
+### 4.2 Benchmark Governance
+
+Benchmark tasks are stored **off-chain** in a versioned JSON dataset hosted in the C-SWON GitHub repository (`benchmarks/v{N}.json`). At each epoch, validators commit an on-chain hash of the benchmark version they are using. This provides:
+
+- **Auditability:** Anyone can verify which benchmark version a validator used
+- **Controlled updates:** New benchmark versions are merged via PR with ≥3 validator sign-offs before the on-chain hash is updated
+- **Tamper detection:** A validator submitting weights based on an unrecognised benchmark hash is flagged by peer consensus
+
+Benchmark composition per version: 15–20% synthetic ground truth tasks, 80–85% diverse real-world tasks across code pipelines, RAG, agent tasks, and data transforms.
+Minimum 50 tasks per version. Tasks are deprecated when >70% of miners consistently score above 0.90, triggering mandatory rotation.
+
+### 4.3 Scoring and Evaluation Methodology
 
 The evaluation process follows a structured six-stage pipeline for each task cycle:
 
-1. **Benchmark Task Selection:** Load a task from the curated benchmark suite (15–20% synthetic ground truth tasks; 80–85% diverse real-world scenarios spanning code pipelines, RAG, agent tasks, and data transforms).
+1. **Benchmark Task Selection:** Load a task from the versioned benchmark suite. Commit the benchmark hash on-chain for auditability.
 2. **Miner Workflow Collection:** Send the task to 5–10 randomly selected miners. Collect workflow plans with a 30-second timeout. Filter out malformed or constraint-violating plans.
-3. **Sandboxed Execution:** For each valid workflow, initialize an isolated execution environment. Execute each step sequentially, tracking actual TAO consumed, wall-clock latency, retry counts, and timeout events.
-4. **Output Quality Evaluation:** Score the final output against the task's quality criteria:
-   - *Code tasks:* Run automated tests, check style compliance, measure functional correctness.
-   - *RAG tasks:* Evaluate answer relevance, citation quality, and factual accuracy.
-   - *Agent tasks:* Check goal completion and reasoning coherence.
-5. **Composite Scoring:** Apply the four-dimensional scoring formula. Normalize scores across miners for the cycle. Apply exponential decay to the rolling 100-task historical average.
-6. **Weight Submission:** Every ~500 blocks (~100 minutes), aggregate scores into a weight vector, cap any single miner at 15% of total weight, and submit to Subtensor.
+3. **Sandboxed Execution:** For each valid workflow, initialise an isolated execution environment. Execute each step, tracking actual TAO consumed, wall-clock latency, retry counts, timeout events, and `steps_completed` for the completion ratio.
+4. **Output Quality Evaluation:** Score the final output against quality criteria:
+   - *Code tasks:* Automated tests, style compliance, functional correctness.
+   - *RAG tasks:* Answer relevance, citation quality, factual accuracy.
+   - *Agent tasks:* Goal completion, reasoning coherence.
+5. **Composite Scoring:** Apply the four-dimensional formula. Compute `S_success = output_quality × completion_ratio`. Apply exponential decay (λ = 0.95) over the rolling 100-task window.
+6. **Weight Submission:** Every ~500 blocks, aggregate scores, cap any single miner at 15% of total weight, and submit to Subtensor.
 
-### Evaluation Cadence
+### 4.4 Evaluation Cadence
 
-- **Query frequency:** Validators continuously send tasks to miners, approximately every 12 seconds (matching Bittensor block time).
-- **Score updates:** Scores are aggregated over a rolling 100-task window per miner, with recent evaluations weighted more heavily via exponential decay.
-- **Weight submission:** Every ~500 blocks, balancing responsiveness to miner strategy changes against on-chain efficiency and coordination costs.
+- **Query frequency:** ~every 12 seconds (Bittensor block time)
+- **Score updates:** Rolling 100-task window with λ = 0.95 exponential decay
+- **Weight submission:** Every ~500 blocks (~100 minutes)
+- **Benchmark version updates:** Community PR process, ≥3 validator sign-offs
 
-### Validator Incentive Alignment
+### 4.5 Validator Incentive Alignment
 
-Validators are incentivized not just to participate, but to maintain genuinely high-quality benchmark suites and honest scoring:
-
-- **Stake at Risk:** Validators must stake TAO to participate. Poor performance (inconsistent weights, low uptime) leads to delegation loss. Detected manipulation risks slashing.
-- **Cross-Validator Consensus:** Validators compare scores on overlapping tasks with peers. Systematic divergence from the consensus damages reputation and reduces stake delegation.
-- **Benchmark Quality Feedback Loop:** Validators maintaining richer benchmarks produce better miners. Better miners drive higher subnet TAO demand, which increases all validators' returns-creating a natural incentive to invest in evaluation infrastructure.
-- **Reputation and Network Effects:** Validators with a track record of fair scoring attract more delegated stake. Established validators have greater influence in cross-validation checks. Long-term reputation value exceeds any short-term gain from score manipulation.
+- **Stake at Risk:** Validators must stake CSWON Alpha to participate. Poor performance leads to delegation loss. Detected manipulation risks slashing.
+- **Cross-Validator Consensus:** Validators compare scores on overlapping tasks. Divergence >2 standard deviations from consensus damages reputation.
+- **Benchmark Quality Feedback Loop:** Richer benchmarks → better miners → higher Alpha demand → higher validator returns.
+- **Execution Reserve Access:** Only validators meeting the N_min task threshold per epoch receive execution subsidies, penalising lazy or inactive validators.
 
 ---
 
-## 5. Business Logic & Market Rationale
+## 5. Alpha Token Economy
+
+### 5.1 CSWON Alpha Role
+
+CSWON Alpha is the primary economic unit within the subnet:
+
+| Actor     | Earns          | Stakes           | Can Swap to TAO via AMM? |
+|-----------|----------------|------------------|--------------------------|
+| Miners    | Alpha (41% cut)| — (not required) | Yes |
+| Validators| Alpha (41% cut)| Alpha (as bond)  | Yes |
+| Stakers   | Alpha dividends| Alpha or TAO     | Yes (auto for TAO stakers) |
+| Owner     | Alpha (18% cut)| —                | Yes |
+
+### 5.2 Liquidity Maintenance
+
+The dTAO AMM pool maintains TAO/CSWON Alpha liquidity automatically:
+
+1. Each block, TAO is injected into the pool proportionally to Alpha injection, keeping the Alpha price stable.
+2. Validators whose delegators hold root TAO receive a portion of their Alpha dividends auto-converted to TAO via the pool.
+3. Phase 3 workflow fees (70% miners / 20% validators / 10% treasury, paid in Alpha) increase buy pressure on Alpha — strengthening the pool's depth over time.
+4. The subnet's emission rate (and thus pool growth) is governed by **net TAO inflows** under the flow-based Taoflow model. Subnets with net outflows receive zero emissions, so attracting genuine stakers is a first-class priority.
+
+### 5.3 Phase 3 Fee Flow (Month 12+)
+
+```
+Workflow fee = 5% surcharge on total TAO spent in a workflow
+
+Distribution:
+  Miners:     70% of fee
+  Validators: 20% of fee
+  Treasury:   10% of fee (dev fund, grants, marketing)
+
+Illustrative (Month 12):
+  100K workflows/day × 30 days × 0.0015τ fee × $500/TAO = $2.25M/month
+    Miners:    $1.58M
+    Validators: $450K
+    Treasury:   $225K
+```
+
+---
+
+## 6. System Architecture
+
+### 6.1 High-Level Architecture
+
+```mermaid
+flowchart TD
+    subgraph APP["Application Layer"]
+        A["AI Agents (Targon, Nous) · Web3 Apps · Enterprise SDK/API"]
+    end
+
+    subgraph GW["C-SWON API Gateway"]
+        G["get_optimal_workflow(task, constraints)
+execute_workflow(plan) · monitor_execution(workflow_id)"]
+    end
+
+    subgraph SL["C-SWON Subnet Layer"]
+        V["Validators (5–20)
+· Publish benchmark tasks (versioned hash on-chain)
+· Execute workflows in sandbox (auth via registered hotkey)
+· Score: success / cost / latency / reliability
+· Submit weight vectors to Subtensor"]
+        M["Miners (30–100)
+· Receive task + constraints
+· Design optimal workflow DAG
+· Select subnets, estimate cost/latency
+· Return executable workflow plan"]
+        S["Subtensor — Blockchain Layer
+· Neuron registry · Weight submissions · Alpha emissions · AMM pool"]
+
+        V -->|Task Queries| M
+        M -->|Workflow Plans| V
+        V -->|Weights| S
+    end
+
+    subgraph ECO["Bittensor Subnet Ecosystem"]
+        E["SN1 (Text) · SN62 (Code Review) · SN64 (Inference)
+SN45 (Testing) · SN70 (Fact Check) · 100+ more subnets"]
+    end
+
+    APP --> GW
+    GW --> SL
+    SL -->|Authenticated workflow calls via registered hotkey| ECO
+
+    style APP fill:#4c1d95,stroke:#7c3aed,color:#fff
+    style GW  fill:#0c4a6e,stroke:#0ea5e9,color:#fff
+    style SL  fill:#1e3a5f,stroke:#3b82f6,color:#fff
+    style ECO fill:#14532d,stroke:#22c55e,color:#fff
+    style A   fill:#6d28d9,stroke:#a78bfa,color:#fff
+    style G   fill:#075985,stroke:#38bdf8,color:#fff
+    style V   fill:#1d4ed8,stroke:#93c5fd,color:#fff
+    style M   fill:#b45309,stroke:#fcd34d,color:#fff
+    style S   fill:#0f172a,stroke:#64748b,color:#fff
+    style E   fill:#166534,stroke:#4ade80,color:#fff
+```
+
+### 6.2 Validation Cycle Detail
+
+```mermaid
+sequenceDiagram
+    participant V as Validator
+    participant M as Miner Pool
+    participant P as Partner Subnets
+
+    V->>M: 1. Task Package (Goal, Quality Criteria, Budget, Latency)
+    M-->>V: 2. Workflow Plans (DAGs with subnet routing + fallbacks)
+
+    Note over V: 3. Sandboxed Execution
+    V->>P: 3a. Authenticated calls via registered hotkey
+    P-->>V: 3b. Outputs + actual TAO cost receipts
+
+    Note over V: 4. Composite Score
+    Note over V: S_success = quality × completion_ratio
+    Note over V: S_cost, S_latency (gated: success > 0.7)
+    Note over V: S_reliability (always scored)
+
+    Note over V: 5. Execution Reserve Claim
+    Note over V: (if validator hit N_min task threshold)
+
+    Note over M: Alpha Rewards via Yuma Consensus
+    Note over V: Alpha Rewards (validator take + staker dividends)
+```
+
+### 6.3 Risk Register
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Low miner participation | Network fails to bootstrap | Early emission multipliers, GPU credits, $50K grants |
+| Validator centralization | Collusion risk | Stake matching for first 10 validators, cross-validator consensus audits |
+| Benchmark staleness | Miners overfit | Dynamic rotation, community PRs, quarterly forced refresh |
+| Competing orchestration layer | Market fragmentation | First-mover advantage, deep API integration, network effects |
+| Insufficient subnet diversity | Limited workflow variety | Revenue-share agreements with partner subnets |
+| High execution costs | Developers avoid C-SWON | Cost scoring baked in; early usage subsidised |
+| **Validator TAO solvency** | **Validators exit due to negative unit economics from sandbox calls** | **Validator Execution Reserve (5% of owner cut); mock execution on testnet; long-term offset via Phase 3 fees** |
+| Negative net TAO inflows | Zero emissions under Taoflow model | Active staker acquisition program; public Alpha staking ROI dashboard |
+| Alpha halving impact | Sudden reward reduction | Pre-announced milestone tracking; treasury buffer for bridging halving transitions |
+
+---
+
+## 7. Business Logic & Market Rationale
 
 ### The Problem and Why It Matters
 
@@ -286,111 +476,19 @@ C-SWON is not just a good idea in the abstract-it is specifically well-suited to
 4. **Network Effects:** Every new subnet makes C-SWON more valuable (more building blocks). Every C-SWON workflow makes participating subnets more valuable (more usage). The value of the orchestration layer scales super-linearly with the number of subnets.
 5. **Decentralized Resilience:** If one subnet underperforms, workflows automatically adapt. Orchestration logic is distributed across miners-no single point of failure.
 
-### Path to Long-Term Adoption
 
-C-SWON's development is structured in four phases designed to bootstrap the network, establish developer adoption, and build a sustainable revenue model independent of emissions:
+### Development Phases
 
-**Phase 1 (Months 1–6): Emission-Driven Bootstrap**
-TAO emissions pay miners and validators while the core protocol is built and testnet moves to mainnet. Target: 30–50 active miners, 5–10 validators, 1,000+ orchestrated workflows per day.
-
-**Phase 2 (Months 6–12): Developer Adoption**
-Integrate with agent frameworks (Targon, Nous, LangChain connectors). Release SDK: `bittensor-cswon` as a drop-in replacement for manual subnet orchestration. Target: 10+ apps using C-SWON, 10,000+ workflows per day.
-
-**Phase 3 (Months 12–24): Revenue Model Launch**
-Introduce per-workflow fees (e.g., +5% on total TAO workflow cost), split as 70% miners / 20% validators / 10% treasury. Launch enterprise tier with SLA guarantees and custom workflow libraries.
-
-**Phase 4 (24+ months): Ecosystem Standard**
-C-SWON becomes the default orchestration layer for all multi-subnet applications. Integration with Bittensor's official API gateway. Subnet collaboration incentives: high-performing subnet pairs earn bonus emissions.
-
-**Illustrative Revenue Projection (Month 12):**
-
-```
-100K workflows/day × 30 days × 0.0015τ fee × $500/TAO = $2.25M/month
-
-Split:
-  Miners:     $1.58M
-  Validators: $450K
-  Treasury:   $225K  (dev fund, grants, marketing)
-```
+| Phase | Timeline | Target |
+|-------|----------|--------|
+| 1 — Bootstrap | Months 1–6 | 30–50 miners, 5–10 validators, 1,000+ workflows/day; mock execution on testnet |
+| 2 — Developer Adoption | Months 6–12 | 10+ apps, 10,000+ workflows/day; mainnet with live sandbox execution |
+| 3 — Revenue Model | Months 12–24 | Per-workflow fee launch; Phase 3 fee stream replaces Execution Reserve |
+| 4 — Ecosystem Standard | 24+ months | Default orchestration layer; Bittensor API gateway integration |
 
 ---
 
-## 6. System Architecture
-
-### High-Level Architecture
-
-```mermaid
-flowchart TD
-    subgraph APP["Application Layer"]
-        A["AI Agents (Targon, Nous) · Web3 Apps · Enterprise SDK/API"]
-    end
-
-    subgraph GW["C-SWON API Gateway"]
-        G["get_optimal_workflow(task, constraints)<br/>execute_workflow(plan)  ·  monitor_execution(workflow_id)"]
-    end
-
-    subgraph SL["C-SWON Subnet Layer"]
-        V["Validators (5–20)<br/>· Publish benchmark tasks<br/>· Execute workflows in sandbox <br/>· Score: success / cost / latency / reliability<br/>· Submit weight vectors to Subtensor"]
-        M["Miners (30–100)<br/>· Receive task + constraints<br/>· Design optimal workflow DAG<br/>· Select subnets, estimate cost/latency<br/>· Return executable workflow plan"]
-        S["Subtensor — Blockchain Layer<br/>· Neuron registry  · Weight submissions  · TAO emissions"]
-
-        V -->|Task Queries| M
-        M -->|Workflow Plans| S
-    end
-
-    subgraph ECO["Bittensor Subnet Ecosystem"]
-        E["SN1 (Text) · SN62 (Code Review) · SN64 (Inference)<br/>SN45 (Testing) · SN70 (Fact Check) · 100+ more subnets"]
-    end
-
-    APP --> GW
-    GW --> SL
-    SL -->|Workflow Executes Calls To| ECO
-
-    style APP fill:#4c1d95,stroke:#7c3aed,color:#fff
-    style GW  fill:#0c4a6e,stroke:#0ea5e9,color:#fff
-    style SL  fill:#1e3a5f,stroke:#3b82f6,color:#fff
-    style ECO fill:#14532d,stroke:#22c55e,color:#fff
-
-    style A fill:#6d28d9,stroke:#a78bfa,color:#fff
-    style G fill:#075985,stroke:#38bdf8,color:#fff
-    style V fill:#1d4ed8,stroke:#93c5fd,color:#fff
-    style M fill:#b45309,stroke:#fcd34d,color:#fff
-    style S fill:#0f172a,stroke:#64748b,color:#fff
-    style E fill:#166534,stroke:#4ade80,color:#fff
-```
-
-### Validation Cycle Detail
-
-```mermaid
-sequenceDiagram
-    participant V as Validator
-    participant M as Miner Pool
-
-    V->>M: 1. Task Package (Goal, Quality Criteria, Budget, Latency Limits)
-    M-->>V: 2. Workflow Plans (DAGs with subnet routing + fallbacks)
-
-    Note over V: 3. Sandboxed Execution<br/>· Call specified subnets<br/>· Track actual cost + latency<br/>· Monitor retries + failures
-
-    Note over V: 4. Composite Score<br/>Success (50%) + Cost (25%) + Latency (15%) + Reliability (10%)
-
-    Note over V: ✅ TAO Emissions (Validator Stake)
-    Note over M: ✅ TAO Rewards (Yuma Consensus)
-```
-
-### Risk Register
-
-| Risk                                    | Impact                         | Mitigation                                                                            |
-| --------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------- |
-| **Low miner participation**       | Network fails to bootstrap     | Early emission multipliers, GPU credit partnerships, $50K miner grants pool           |
-| **Validator centralization**      | Collusion risk                 | Stake matching for first 10 validators, open documentation, cross-validator audits    |
-| **Benchmark staleness**           | Miners overfit to static tasks | Dynamic rotation, community-contributed tasks, quarterly refreshes                    |
-| **Competing orchestration layer** | Market fragmentation           | First-mover advantage, deep Bittensor API integration, strong network effects         |
-| **Insufficient subnet diversity** | Limited workflow variety       | Actively recruit subnets; position C-SWON as a usage driver for their subnet          |
-| **High execution costs**          | Developers avoid C-SWON        | Cost optimization baked into scoring; subsidize early usage; publish ROI case studies |
-
----
-
-## 7. Go-To-Market Strategy
+## 8. Go-To-Market Strategy
 
 ### Target Users and Anchor Use Cases
 
@@ -425,12 +523,12 @@ Three anchor use cases demonstrate the value proposition concretely:
 
 ### Early Participation Incentives
 
-| Stakeholder                     | Incentive                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| **Miners (first 50)**     | 1.5× emission multiplier for first 6 months + GPU credits ($500–$1,000) + $50K grants pool           |
-| **Validators (first 10)** | 2:1 TAO stake match (up to 1,000 TAO) + $20K benchmark dataset grants + elevated DAO governance voting |
-| **Developers**            | First 10,000 workflows free per project + $500–$2,000 migration bounty from manual orchestration      |
-| **Subnet Partners**       | 5% traffic revenue share from C-SWON fees + $10K co-marketing budget per partnered subnet              |
+| Stakeholder | Incentive |
+|-------------|-----------|
+| Miners (first 50) | 1.5× Alpha emission multiplier for first 6 months + GPU credits ($500–$1,000) + $50K grants pool |
+| Validators (first 10) | 2:1 Alpha stake match (up to 1,000 TAO equivalent) + $20K benchmark dataset grants + elevated DAO governance voting |
+| Developers | First 10,000 workflows free per project + $500–$2,000 migration bounty |
+| Subnet Partners | 5% traffic revenue share from C-SWON fees + $10K co-marketing budget |
 
 ---
 
@@ -438,10 +536,10 @@ Three anchor use cases demonstrate the value proposition concretely:
 
 > *"Bittensor has 100+ specialized AI services, but no brain to wire them together. C-SWON is that brain-a subnet where the commodity is optimal orchestration policy. We turn 'which subnets to call and how' into a competitive intelligence market, making Bittensor the world's first truly composable AI operating system. This isn't just another subnet-it's the meta-layer that makes all other subnets exponentially more valuable."*
 
-> **GitHub:** [https://github.com/adysingh5711/C-SWON](https://github.com/adysingh5711/C-SWON) · 
-> **Demo:** [https://youtu.be/X2RZts7AXX0](https://youtu.be/X2RZts7AXX0) · 
-> **Hackathon Link:** [https://www.hackquest.io/hackathons/Bittensor-Subnet-Ideathon](https://www.hackquest.io/hackathons/Bittensor-Subnet-Ideathon) · 
-> **Results:** [https://x.com/singhaditya5711/status/2030662024922071367?s=20](https://x.com/singhaditya5711/status/2030662024922071367?s=20) · 
+> **GitHub:** [https://github.com/adysingh5711/C-SWON](https://github.com/adysingh5711/C-SWON) </br>
+> **Demo:** [https://youtu.be/X2RZts7AXX0](https://youtu.be/X2RZts7AXX0) </br>
+> **Hackathon Link:** [https://www.hackquest.io/hackathons/Bittensor-Subnet-Ideathon](https://www.hackquest.io/hackathons/Bittensor-Subnet-Ideathon) </br>
+> **Results:** [https://x.com/singhaditya5711/status/2030662024922071367?s=20](https://x.com/singhaditya5711/status/2030662024922071367?s=20) </br>
 > **Whitepaper:** Upcoming
 
 *C-SWON: Cross-Subnet Workflow Orchestration Network - Making Bittensor Composable*
