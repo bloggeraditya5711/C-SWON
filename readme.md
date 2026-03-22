@@ -45,12 +45,12 @@ flowchart TD
     classDef formula fill:#065f46,stroke:#6ee7b7,color:#fff
 ```
 
-| Variable | Unit        | Definition |
-|----------|-------------|------------|
-| Δα       | Alpha/tempo | Total Alpha allocated to participants per tempo |
-| R_i      | Alpha       | Reward to miner i per tempo |
+| Variable | Unit        | Definition                                      |
+| -------- | ----------- | ----------------------------------------------- |
+| Δα     | Alpha/tempo | Total Alpha allocated to participants per tempo |
+| R_i      | Alpha       | Reward to miner i per tempo                     |
 | W_i      | float [0,1] | Yuma stake-weighted composite score for miner i |
-| W_j      | float [0,1] | Score for miner j — normalisation denominator |
+| W_j      | float [0,1] | Score for miner j — normalisation denominator  |
 
 **TAO liquidity:** TAO is injected into the C-SWON AMM pool at each block proportionally to Alpha injection, stabilising the Alpha price. Stakers who hold TAO on the root subnet receive a portion of validator dividends converted to TAO via this AMM swap, gradually deepening the liquidity pool through real usage.
 
@@ -113,12 +113,12 @@ error handling more than a hard failure (0.10×2 + 0.50 = 0.70 vs 0.50 for no re
 
 To avoid circular dependencies — C-SWON calling a model subnet to judge C-SWON workflows — all quality scoring in v1 uses **deterministic, reference-based methods**.
 
-| Task Type          | `output_quality_score` Method | Ground Truth Source |
-|--------------------|-------------------------------|---------------------|
-| **Code**           | Automated test pass rate + PEP8 linting score | Unit tests embedded in benchmark task JSON |
-| **RAG**            | ROUGE-L F1 against reference answer | Reference answers in benchmark dataset |
-| **Agent**          | Binary goal checklist: pass/fail per criterion; score = passed / total | Goal checklist in benchmark task JSON |
-| **Data transform** | Schema validation + exact-match against expected output | Expected output in benchmark task JSON |
+| Task Type                | `output_quality_score` Method                                        | Ground Truth Source                        |
+| ------------------------ | ---------------------------------------------------------------------- | ------------------------------------------ |
+| **Code**           | Automated test pass rate + PEP8 linting score                          | Unit tests embedded in benchmark task JSON |
+| **RAG**            | ROUGE-L F1 against reference answer                                    | Reference answers in benchmark dataset     |
+| **Agent**          | Binary goal checklist: pass/fail per criterion; score = passed / total | Goal checklist in benchmark task JSON      |
+| **Data transform** | Schema validation + exact-match against expected output                | Expected output in benchmark task JSON     |
 
 **Why ROUGE-L for RAG (not an LLM judge):** ROUGE-L measures longest common subsequence overlap against a known reference answer. It is fast, deterministic, and reproducible — every validator produces the identical score for the same output. LLM judges require calling a model subnet (creating a recursive dependency) and produce non-deterministic results, making cross-validator consensus impossible in v1.
 
@@ -144,6 +144,7 @@ C-SWON does **not** introduce on-chain slashing — Bittensor does not support a
   workflows. Miners cannot distinguish these from real tasks.
 - **VRF-keyed per-validator task schedule (pre-caching and collusion resistant):**
   Each validator derives its task assignment from its own hotkey and the current block, making the per-validator stream pseudorandom but fully deterministic:
+
   ```python
   import hashlib
   seed       = f"{validator_hotkey}:{current_block}".encode()
@@ -151,6 +152,7 @@ C-SWON does **not** introduce on-chain slashing — Bittensor does not support a
   task_index = int.from_bytes(h, 'big') % len(benchmark_tasks)
   task       = benchmark_tasks[task_index]
   ```
+
   Different validators query different tasks at the same block height. Miners cannot pre-compute a per-validator cache without knowing every validator's hotkey and the current block simultaneously. Cross-validator score comparison uses distributional statistics over the rolling window, not identical-task point comparisons. Yuma's bond mechanism automatically reduces rewards for persistent outlier validators.
 - **Scoring version enforcement:** Validators encode `SCORING_VERSION` as an integer in `__spec_version__` and as a human-readable string in `axon.info.description` (e.g. `"cswon-scoring:1.0.0"`). `axon.info.version` is an SDK-managed integer and must not be written manually. Mismatches are detected by reading `metagraph.axons[uid].version` (int) and `.description` (string) from the live metagraph. See Section 4.5 for the full upgrade protocol.
 - **Dynamic Benchmark Rotation:** Tasks are deprecated when >70% of miners score above 0.90 consistently for 3 consecutive tempos, triggering mandatory dataset rotation.
@@ -172,13 +174,13 @@ C-SWON does **not** introduce on-chain slashing — Bittensor does not support a
 
 **Active stake requirement:**
 
-| Requirement       | Minimum  | Recommended |
-|-------------------|----------|-------------|
-| TAO stake (active)| 1 TAO    | 10 TAO      |
-| CPU               | 4 cores  | 8 cores     |
-| RAM               | 16 GB    | 32 GB       |
-| Network           | 100 Mbps | 1 Gbps      |
-| Uptime target     | 90%      | 99%         |
+| Requirement        | Minimum  | Recommended |
+| ------------------ | -------- | ----------- |
+| TAO stake (active) | 1 TAO    | 10 TAO      |
+| CPU                | 4 cores  | 8 cores     |
+| RAM                | 16 GB    | 32 GB       |
+| Network            | 100 Mbps | 1 Gbps      |
+| Uptime target      | 90%      | 99%         |
 
 Miners must maintain ≥1 TAO active stake on their hotkey after the immunity period expires. Miners below this threshold become candidates for deregistration under standard Yuma pruning when all UID slots are full. They cannot be deregistered during their `immunity_period` regardless of stake.
 
@@ -209,6 +211,7 @@ All workflow DAG nodes follow a strict I/O contract, executed by the validator r
 ```
 
 Examples:
+
 - `"${step_1.output.text}"`
 - `"${step_2.output.artifacts.code}"`
 
@@ -218,6 +221,7 @@ Examples:
 2. After each node completes (success or failure), store its output in `context[node_id]`.
 3. Before executing node `K`, resolve only the `"${...}"` patterns that reference *completed* upstream nodes. If a referenced node is still executing, wait for it.
 4. **Before dispatching** each node to its partner subnet, the executor checks the cumulative TAO cost so far:
+
    ```python
    budget_ceiling = min(constraints["max_budget_tao"],
                         1.5 * workflow_plan["total_estimated_cost"])
@@ -227,16 +231,17 @@ Examples:
            context[node.id] = {"status": "budget_abort", "output": None}
        break   # exit execution loop; S_cost forced to 0 at scoring time
    ```
+
    This check runs **before** each node dispatch, so the validator is never billed for a node that exceeds the ceiling. Aborted nodes are counted in `total_steps_in_dag` but not in `steps_completed`, reducing `completion_ratio`. `S_cost` is forced to 0 for any workflow that triggered a budget abort.
 5. If a referenced field does not exist, exceeds size limits, or the upstream node **that this specific DataRef points to** failed, the current step is marked a hard failure and contributes to `S_reliability`. A parallel sibling's failure does NOT propagate to unrelated nodes.
 
 **Parallel DAG rules (fix: undefined behaviour removed):**
 
-| Metric | Sequential DAG | Parallel DAG |
-|--------|---------------|-------------|
-| `completion_ratio` | `steps_completed / total_nodes` | `steps_completed / total_nodes` (same; counts nodes, not paths) |
-| `S_latency` | wall-clock end-to-end time | wall-clock end-to-end time (correct; parallel branches compress it) |
-| `S_cost` | sum of all step costs | sum of all step costs (parallel steps both charged) |
+| Metric                      | Sequential DAG                       | Parallel DAG                                                             |
+| --------------------------- | ------------------------------------ | ------------------------------------------------------------------------ |
+| `completion_ratio`        | `steps_completed / total_nodes`    | `steps_completed / total_nodes` (same; counts nodes, not paths)        |
+| `S_latency`               | wall-clock end-to-end time           | wall-clock end-to-end time (correct; parallel branches compress it)      |
+| `S_cost`                  | sum of all step costs                | sum of all step costs (parallel steps both charged)                      |
 | DataRef failure propagation | upstream failure → downstream fails | only if the specific referenced node failed; unrelated branches continue |
 
 **Example:** A→C and B→C (A and B independent). A completes, B fails. C only needs `${A.output.text}`. C **proceeds**; B's failure reduces `completion_ratio` by 1/3 but does not block C. If C needed `${B.output.text}`, C hard-fails.
@@ -286,7 +291,6 @@ class WorkflowSynapse(bt.Synapse):
 **Validator reads** `response.miner_uid`, `response.workflow_plan`, etc. </br>
 **Validator writes** `task_id`, `task_type`, `description`, `constraints`, `available_tools`, `send_block` before calling `dendrite.forward()`. </br>
 The miner populates all `Optional` fields in its `forward()` handler and returns the synapse. Any `Optional` field left as `None` by the miner is treated as an invalid response and discarded.
-
 
 ---
 
@@ -381,6 +385,7 @@ The miner populates all `Optional` fields in its `forward()` handler and returns
 > select which miners on a partner subnet to call and how to aggregate their outputs.
 > All validators reading the same benchmark task JSON will route identically, making
 > cross-validator score comparison valid. The `aggregation` values are:
+>
 > - `"median_logit"` — take the median of numeric outputs (e.g. token logits)
 > - `"majority_vote"` — take the modal text output across the top-k miners
 >
@@ -388,12 +393,12 @@ The miner populates all `Optional` fields in its `forward()` handler and returns
 
 ### 3.4 Performance Dimensions
 
-| Dimension        | Weight | Formula |
-|------------------|--------|---------|
-| Task Success     | 50%    | `output_quality × completion_ratio` |
-| Cost Efficiency  | 25%    | `max(0, 1 − actual/budget)` — gated at S_success > 0.7 |
-| Latency          | 15%    | `max(0, 1 − actual_s/max_s)` — gated at S_success > 0.7 |
-| Reliability      | 10%    | `min(1.0, max(0, 1 − unplanned_retries×0.1 − timeouts×0.2 − failures×0.5))` — planned retries free |
+| Dimension       | Weight | Formula                                                                                                     |
+| --------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
+| Task Success    | 50%    | `output_quality × completion_ratio`                                                                      |
+| Cost Efficiency | 25%    | `max(0, 1 − actual/budget)` — gated at S_success > 0.7                                                  |
+| Latency         | 15%    | `max(0, 1 − actual_s/max_s)` — gated at S_success > 0.7                                                 |
+| Reliability     | 10%    | `min(1.0, max(0, 1 − unplanned_retries×0.1 − timeouts×0.2 − failures×0.5))` — planned retries free |
 
 Tracked but not yet weighted (signals for v2):
 
@@ -405,12 +410,12 @@ Tracked but not yet weighted (signals for v2):
 
 The "1.5× emission multiplier" is not achievable at the Yuma protocol level. C-SWON incentivises early miners through protocol-safe alternatives instead:
 
-| Incentive | Mechanism | Protocol-Safe? |
-|-----------|-----------|---------------|
-| **3× query frequency** for first 50 registered miners, first 6 months | Validators triple selection probability for early miners in the task lottery (`validator/miner_selection.py`) | ✅ |
-| **Faster score window fill** | More queries → rolling window fills faster → emissions begin sooner | ✅ |
-| **GPU credits ($500–$1,000)** | Off-chain grants from owner treasury | ✅ |
-| **$50K grants pool** | Off-chain, milestone-gated | ✅ |
+| Incentive                                                                    | Mechanism                                                                                                       | Protocol-Safe? |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------- |
+| **3× query frequency** for first 50 registered miners, first 6 months | Validators triple selection probability for early miners in the task lottery (`validator/miner_selection.py`) | ✅             |
+| **Faster score window fill**                                           | More queries → rolling window fills faster → emissions begin sooner                                           | ✅             |
+| **GPU credits ($500–$1,000)**                                         | Off-chain grants from owner treasury                                                                            | ✅             |
+| **$50K grants pool**                                                   | Off-chain, milestone-gated                                                                                      | ✅             |
 
 For validators (first 10): the owner manually stakes up to 1,000 TAO equivalent in Alpha on behalf of qualifying validators. This is a manual on-chain action per transfer, publicly auditable, and not a protocol feature.
 
@@ -449,6 +454,7 @@ if (current_block - last_set_block >= TEMPO
 ```
 
 This ensures:
+
 - Weights are always submitted within the same Yuma epoch they were earned.
 - `CommittingWeightsTooFast` is never triggered (guarded by the dual-condition check above).
 - No reward signal drift from skipped epochs.
@@ -500,15 +506,15 @@ elapsed since the query was sent.
 Validators run sandboxed Docker containers, automated test runners, and ROUGE-L
 scoring — they need substantially more resources than miners.
 
-| Requirement  | Minimum   | Recommended |
-|--------------|-----------|-------------|
-| CPU          | 8 cores   | 16 cores    |
-| RAM          | 32 GB     | 64 GB       |
-| SSD storage  | 500 GB    | 1 TB NVMe   |
-| Network      | 1 Gbps    | 10 Gbps     |
-| Docker       | 24.x+     | 26.x+       |
-| Python       | 3.10+     | 3.11+       |
-| Uptime target| 95%       | 99.5%       |
+| Requirement   | Minimum | Recommended |
+| ------------- | ------- | ----------- |
+| CPU           | 8 cores | 16 cores    |
+| RAM           | 32 GB   | 64 GB       |
+| SSD storage   | 500 GB  | 1 TB NVMe   |
+| Network       | 1 Gbps  | 10 Gbps     |
+| Docker        | 24.x+   | 26.x+       |
+| Python        | 3.10+   | 3.11+       |
+| Uptime target | 95%     | 99.5%       |
 
 Validators running below minimum spec will be bottlenecked during sandboxed execution, fail to meet `N_min`, and lose execution support payouts — functioning as natural self-exclusion.
 
@@ -518,11 +524,11 @@ Validators running below minimum spec will be bottlenecked during sandboxed exec
 
 All calls to partner subnets are **off-chain HTTP** — C-SWON makes no claim of on-chain receipts, as Bittensor's Subtensor records no trace of inter-subnet calls.
 
-| Stage | Authentication Model |
-|-------|---------------------|
-| Testnet | Mock execution (`CSWON_MOCK_EXEC=true`). No real calls, no TAO burned. |
-| Mainnet bootstrap | Validator registers a C-SWON dedicated hotkey on each partner subnet. Calls at standard rates, subsidised by the Execution Support Pool. |
-| Mainnet at scale | Negotiated API-tier access with high-traffic partner subnets. Revenue-share (5% of gateway fees → partner subnet) replaces per-call costs. |
+| Stage             | Authentication Model                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Testnet           | Mock execution (`CSWON_MOCK_EXEC=true`). No real calls, no TAO burned.                                                                    |
+| Mainnet bootstrap | Validator registers a C-SWON dedicated hotkey on each partner subnet. Calls at standard rates, subsidised by the Execution Support Pool.    |
+| Mainnet at scale  | Negotiated API-tier access with high-traffic partner subnets. Revenue-share (5% of gateway fees → partner subnet) replaces per-call costs. |
 
 **Security model for MVP:** Off-chain execution logs + VRF-keyed per-validator task
 schedule (validators test different tasks per block; collusion requires knowing all
@@ -624,8 +630,7 @@ Validators may incur TAO costs from sandboxed calls to partner subnets. C-SWON m
 - Payouts are computed off-chain from validator execution logs and sent as Alpha transfers from the owner wallet — fully visible on-chain per transfer.
 - **Testnet / early mainnet:** validators run in mock mode (`CSWON_MOCK_EXEC=true`), so no TAO is burned and no pool payout is required during bootstrapping.
 
-> The Execution Support Pool is an economic commitment by the owner, not a protocol
-> escrow. Every payout is an auditable on-chain Alpha transfer.
+> The Execution Support Pool is an economic commitment by the owner, not a protocol escrow. Every payout is an auditable on-chain Alpha transfer.
 
 ---
 
@@ -641,11 +646,11 @@ Benchmark composition: 15–20% synthetic ground truth, 80–85% real-world task
 
 **Lifecycle rules per task (fix: buggy tasks now detectable):**
 
-| Trigger | Action | Rationale |
-|---------|--------|-----------|
-| >70% of miners score >0.90 for 3 consecutive tempos | Deprecate task | Overfitted; no longer discriminating |
+| Trigger                                             | Action                                           | Rationale                                                               |
+| --------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------- |
+| >70% of miners score >0.90 for 3 consecutive tempos | Deprecate task                                   | Overfitted; no longer discriminating                                    |
 | >70% of miners score <0.10 for 3 consecutive tempos | **Quarantine** task; flag for human review | Likely broken test, bad reference answer, or unreachable partner subnet |
-| Quarantined task unresolved after 5 tempos | Remove from active pool automatically | Prevents dead weight permanently distorting scores |
+| Quarantined task unresolved after 5 tempos          | Remove from active pool automatically            | Prevents dead weight permanently distorting scores                      |
 
 A `"status"` field is added to each task entry in `benchmarks/v{N}.json`:
 
@@ -666,6 +671,7 @@ Valid values: `"active"` | `"quarantined"` | `"deprecated"`. Validators skip tas
 ### 4.8 Evaluation Methodology (Six-Stage Pipeline)
 
 1. **Deterministic task selection:**
+
    ```python
    import hashlib
    seed = f"{validator_hotkey}:{current_block}".encode()
@@ -673,39 +679,37 @@ Valid values: `"active"` | `"quarantined"` | `"deprecated"`. Validators skip tas
    task_index = int.from_bytes(h, 'big') % len(benchmark_tasks)
    task       = benchmark_tasks[task_index]
    ```
+
    Different validators derive different tasks from the same block via their hotkey-keyed VRF. Cross-validator consensus uses distributional statistics over the rolling window, not identical-task point comparisons — eliminating the need for a gossip layer.
-
 2. **Miner workflow collection:** Send task to 5–10 randomly selected miners with a sub-block timeout (≤ 10 seconds). For each response, validate that the signed `dendrite.hotkey` matches the queried UID in the metagraph before accepting a workflow plan. Discard any response whose hotkey does not match, even if the JSON is well-formed.
-
 3. **Sandboxed execution:** Spin up an isolated Docker container per workflow. Execute each DAG step, resolve DataRefs, and track:
+
    - Actual TAO consumed per step
    - Wall-clock latency per step
    - Retry counts, timeouts, hard failures
    - `steps_completed` for `completion_ratio`
-
 4. **Output quality evaluation (deterministic, no LLM judge):**
+
    - **Code:** Automated test pass rate + linting — test suite in task JSON.
    - **RAG:** ROUGE-L F1 against reference answer in benchmark dataset.
    - **Agent:** Binary goal checklist pass rate — checklist in task JSON.
    - **Data transform:** Schema validation + exact-match against expected output.
-
 5. **Composite scoring:** Apply the four-dimensional formula. Compute `S_success = output_quality × completion_ratio`. Add to the rolling 100-task equal-weight window.
-
 6. **Weight submission:** Once per tempo. Normalise scores, cap at 15% per miner, call `set_weights()`.
 
 ---
 
 ### 4.9 Evaluation Cadence
 
-| Parameter                | Value                        | Configurable via |
-|--------------------------|------------------------------|------------------|
-| Query frequency          | Async, 1 send per block; ≤ 10 s recv timeout | Not configurable |
-| Score window             | Rolling 100 tasks, equal weight | `validator/config.py` |
-| Weight submission        | Once per tempo (360 blocks)  | `tempo` hyperparameter |
-| N_min for exec support   | 30 tasks per tempo           | `EXEC_SUPPORT_N_MIN` |
-| Benchmark version signal | `axon.info.description` string + `__spec_version__` int | PR + ≥3 sign-offs |
-| Warmup threshold         | 20 tasks                     | `WARMUP_TASK_THRESHOLD` |
-| Scoring version          | `__spec_version__ = 10000` (int) + description string | ≥67% validator vote |
+| Parameter                | Value                                                       | Configurable via          |
+| ------------------------ | ----------------------------------------------------------- | ------------------------- |
+| Query frequency          | Async, 1 send per block; ≤ 10 s recv timeout               | Not configurable          |
+| Score window             | Rolling 100 tasks, equal weight                             | `validator/config.py`   |
+| Weight submission        | Once per tempo (360 blocks)                                 | `tempo` hyperparameter  |
+| N_min for exec support   | 30 tasks per tempo                                          | `EXEC_SUPPORT_N_MIN`    |
+| Benchmark version signal | `axon.info.description` string + `__spec_version__` int | PR + ≥3 sign-offs        |
+| Warmup threshold         | 20 tasks                                                    | `WARMUP_TASK_THRESHOLD` |
+| Scoring version          | `__spec_version__ = 10000` (int) + description string     | ≥67% validator vote      |
 
 ---
 
@@ -717,21 +721,13 @@ Valid values: `"active"` | `"quarantined"` | `"deprecated"`. Validators skip tas
 - **Delegation signal:** Stakers monitor validator history via the public dashboard and move stake to higher-quality validators.
 
 > **vtrust bootstrap period (fix: expected behaviour, not a bug):**
-> New validators start with `vtrust = 0.0` at registration. Bittensor's Yuma
-> Consensus only grants vtrust as a validator's submitted weights converge with
-> the stake-weighted consensus over multiple tempos. During the **first 5–10 tempos**
-> (~6–12 hours at 360-block tempos), a new validator earns minimal emissions even if
-> their hardware is perfect and their scoring is accurate. This is **expected
-> Bittensor behaviour**, not a broken setup.
+> New validators start with `vtrust = 0.0` at registration. Bittensor's Yuma Consensus only grants vtrust as a validator's submitted weights converge with the stake-weighted consensus over multiple tempos. During the **first 5–10 tempos** (~6–12 hours at 360-block tempos), a new validator earns minimal emissions even if their hardware is perfect and their scoring is accurate. This is **expected Bittensor behaviour**, not a broken setup.
 >
 > New validators should:
-> 1. Confirm their axon is reachable and UID is registered:
->    `btcli subnet metagraph --netuid <netuid>` — look for your hotkey in the output.
-> 2. Monitor `vtrust` in the metagraph — it should begin climbing after tempo 3–5
->    as bonds accumulate.
-> 3. Expect near-zero Alpha earnings for the first 12–24 hours. If vtrust is still
->    0.0 after tempo 10, check weight submission logs for `CommittingWeightsTooFast`
->    or signature errors.
+>
+> 1. Confirm their axon is reachable and UID is registered: `btcli subnet metagraph --netuid <netuid>` — look for your hotkey in the output.
+> 2. Monitor `vtrust` in the metagraph — it should begin climbing after tempo 3–5 as bonds accumulate.
+> 3. Expect near-zero Alpha earnings for the first 12–24 hours. If vtrust is still 0.0 after tempo 10, check weight submission logs for `CommittingWeightsTooFast` or signature errors.
 
 ---
 
@@ -739,12 +735,12 @@ Valid values: `"active"` | `"quarantined"` | `"deprecated"`. Validators skip tas
 
 ### 5.1 CSWON Alpha Role
 
-| Actor      | Earns            | Stakes                | Can Swap to TAO via AMM? |
-|------------|------------------|-----------------------|--------------------------|
-| Miners     | Alpha (41% cut)  | Not required          | Yes |
-| Validators | Alpha (41% cut)  | Alpha (voluntary bond)| Yes |
-| Stakers    | Alpha dividends  | Alpha or TAO          | Yes (auto for TAO stakers) |
-| Owner      | Alpha (18% cut)  | —                     | Yes |
+| Actor      | Earns           | Stakes                 | Can Swap to TAO via AMM?   |
+| ---------- | --------------- | ---------------------- | -------------------------- |
+| Miners     | Alpha (41% cut) | Not required           | Yes                        |
+| Validators | Alpha (41% cut) | Alpha (voluntary bond) | Yes                        |
+| Stakers    | Alpha dividends | Alpha or TAO           | Yes (auto for TAO stakers) |
+| Owner      | Alpha (18% cut) | —                     | Yes                        |
 
 ### 5.2 Liquidity Maintenance
 
@@ -777,12 +773,7 @@ Illustrative projection (Month 12):
     Treasury:   ~$54K
 ```
 
-> **Note on earlier projections:** The figure of $2.25M/month cited in some earlier
-> drafts assumed an average fee of 0.0015τ per workflow. This is not consistent with
-> the example workflow cost of 0.0072τ shown in Section 3.3 (5% × 0.0072τ = 0.00036τ).
-> The corrected figure above uses the actual example cost. Higher workflow complexity
-> in production (longer DAGs, more subnets) may increase the average cost and thus
-> the fee — but this cannot be stated as a ground-up projection without real usage data.
+> **Note on earlier projections:** The figure of $2.25M/month cited in some earlier drafts assumed an average fee of 0.0015τ per workflow. This is not consistent with the example workflow cost of 0.0072τ shown in Section 3.3 (5% × 0.0072τ = 0.00036τ). The corrected figure above uses the actual example cost. Higher workflow complexity in production (longer DAGs, more subnets) may increase the average cost and thus the fee — but this cannot be stated as a ground-up projection without real usage data.
 
 Users integrating directly at the protocol level (not via Gateway) pay no fee in v1. A trustless fee mechanism is a Phase 4 R&D item.
 
@@ -876,28 +867,28 @@ sequenceDiagram
 
 ### 6.3 Risk Register
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Low miner participation | Network fails to bootstrap | 3× query frequency for early miners; GPU credits ($500–$1K); $50K grants pool |
-| Validator centralization | Collusion risk | Deterministic task schedule makes outliers visible in weights matrix; Yuma bond mechanism |
-| Benchmark staleness | Miners overfit | Deprecation at >70% scoring 0.90+ for 3 tempos; quarterly forced rotation |
-| Competing orchestration layer | Market fragmentation | First-mover; network effects; deep Bittensor API integration |
-| Insufficient subnet diversity | Limited workflow variety | Revenue-share (5% gateway fees) with partner subnets |
-| High execution costs | Developers avoid C-SWON | Cost dimension baked into scoring; gateway subsidises early usage |
-| Validator TAO solvency | Validators exit | Owner-managed Execution Support Pool; mock mode on testnet; Phase 3 fees long-term |
-| Negative net TAO inflows | Zero emissions (Taoflow) | Active staker acquisition; public Alpha staking ROI dashboard |
-| Alpha halving impact | Sudden reward reduction | Pre-announced milestone tracking; treasury buffer |
-| Immunity period scoring noise | New miners earn zero initially | Warm-up scale `min(1.0, tasks_seen / 20)` applied in weight calculation |
-| Scoring formula version split | Divergent weights during upgrades | `SCORING_VERSION` in axon metadata; ≥67% stake vote; 2-tempo notice before upgrade |
-| LLM judge dependency (v2) | Recursive call / non-determinism | v1 uses ROUGE-L + test runners only; LLM judge is a named v2 upgrade path |
-| Gateway fee centralization | Fee model requires centralized gateway | Explicitly acknowledged; trustless fee module is Phase 4 R&D |
+| Risk                                           | Impact                                                               | Mitigation                                                                                                      |
+| ---------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Low miner participation                        | Network fails to bootstrap                                           | 3× query frequency for early miners; GPU credits ($500–$1K); $50K grants pool                                 |
+| Validator centralization                       | Collusion risk                                                       | Deterministic task schedule makes outliers visible in weights matrix; Yuma bond mechanism                       |
+| Benchmark staleness                            | Miners overfit                                                       | Deprecation at >70% scoring 0.90+ for 3 tempos; quarterly forced rotation                                       |
+| Competing orchestration layer                  | Market fragmentation                                                 | First-mover; network effects; deep Bittensor API integration                                                    |
+| Insufficient subnet diversity                  | Limited workflow variety                                             | Revenue-share (5% gateway fees) with partner subnets                                                            |
+| High execution costs                           | Developers avoid C-SWON                                              | Cost dimension baked into scoring; gateway subsidises early usage                                               |
+| Validator TAO solvency                         | Validators exit                                                      | Owner-managed Execution Support Pool; mock mode on testnet; Phase 3 fees long-term                              |
+| Negative net TAO inflows                       | Zero emissions (Taoflow)                                             | Active staker acquisition; public Alpha staking ROI dashboard                                                   |
+| Alpha halving impact                           | Sudden reward reduction                                              | Pre-announced milestone tracking; treasury buffer                                                               |
+| Immunity period scoring noise                  | New miners earn zero initially                                       | Warm-up scale `min(1.0, tasks_seen / 20)` applied in weight calculation                                       |
+| Scoring formula version split                  | Divergent weights during upgrades                                    | `SCORING_VERSION` in axon metadata; ≥67% stake vote; 2-tempo notice before upgrade                           |
+| LLM judge dependency (v2)                      | Recursive call / non-determinism                                     | v1 uses ROUGE-L + test runners only; LLM judge is a named v2 upgrade path                                       |
+| Gateway fee centralization                     | Fee model requires centralized gateway                               | Explicitly acknowledged; trustless fee module is Phase 4 R&D                                                    |
 | Pre-caching attack (miners memorise all tasks) | Miners serve cached plans; no real orchestration intelligence tested | VRF-style task schedule keyed to `(validator_hotkey, block)`; miners cannot predict per-validator task stream |
-| Score reassignment by dishonest validator | Validator attributes good miner A plan to miner B | Mandatory `dendrite.hotkey == metagraph.hotkeys[uid]` check before accepting any response |
-| Partner subnet non-determinism | Different validators call different partner miners; scores diverge | Canonical routing policy (top-3 stake-weighted miners, median/majority aggregation) encoded in benchmark JSON |
-| Validator budget bleed via fake estimates | Malicious miners force expensive sandbox executions | Abort at min(max_budget_tao, 1.5× estimated_cost); remaining nodes unexecuted; S_cost = 0 |
-| Buggy benchmark task (always scores 0) | Broken task becomes permanent dead weight | Quarantine trigger: >70% miners <0.10 for 3 tempos → quarantine → remove after 5 tempos |
-| New validator vtrust confusion | Validators quit after day 1 seeing zero earnings | vtrust bootstrap note in Section 4.10; expected 0 for first 5–10 tempos |
-| No runnable code at launch | No one can actually participate | Quickstart guide (Section 10) + required repo layout defined |
+| Score reassignment by dishonest validator      | Validator attributes good miner A plan to miner B                    | Mandatory `dendrite.hotkey == metagraph.hotkeys[uid]` check before accepting any response                     |
+| Partner subnet non-determinism                 | Different validators call different partner miners; scores diverge   | Canonical routing policy (top-3 stake-weighted miners, median/majority aggregation) encoded in benchmark JSON   |
+| Validator budget bleed via fake estimates      | Malicious miners force expensive sandbox executions                  | Abort at min(max_budget_tao, 1.5× estimated_cost); remaining nodes unexecuted; S_cost = 0                      |
+| Buggy benchmark task (always scores 0)         | Broken task becomes permanent dead weight                            | Quarantine trigger: >70% miners <0.10 for 3 tempos → quarantine → remove after 5 tempos                       |
+| New validator vtrust confusion                 | Validators quit after day 1 seeing zero earnings                     | vtrust bootstrap note in Section 4.10; expected 0 for first 5–10 tempos                                        |
+| No runnable code at launch                     | No one can actually participate                                      | Quickstart guide (Section 10) + required repo layout defined                                                    |
 
 ---
 
@@ -921,21 +912,21 @@ Each new subnet that joins Bittensor *increases* the orchestration surface area 
 
 **Within Bittensor:**
 
-| Solution | What It Does | Why C-SWON Is Different |
-|----------|-------------|-------------------------|
-| Manual Integration | Developers call subnets directly | C-SWON automates optimal routing through competition |
-| Bittensor API Layer *(in dev)* | Unified API access | Solves interop infrastructure, not routing intelligence |
-| Agent Subnets (SN6, etc.) | Build agents that use tools | Agents *consume* C-SWON; C-SWON provides the strategies |
-| Individual Subnet Routers | Internal load balancing | C-SWON operates *across* subnets, not within one |
+| Solution                      | What It Does                     | Why C-SWON Is Different                                  |
+| ----------------------------- | -------------------------------- | -------------------------------------------------------- |
+| Manual Integration            | Developers call subnets directly | C-SWON automates optimal routing through competition     |
+| Bittensor API Layer*(in dev)* | Unified API access               | Solves interop infrastructure, not routing intelligence  |
+| Agent Subnets (SN6, etc.)     | Build agents that use tools      | Agents*consume* C-SWON; C-SWON provides the strategies |
+| Individual Subnet Routers     | Internal load balancing          | C-SWON operates*across* subnets, not within one        |
 
 **Outside Bittensor:**
 
-| Solution | Limitations vs. C-SWON |
-|----------|-----------------------|
-| LangChain / LlamaIndex | Centralised; no incentivised optimisation; manual routing |
-| OpenAI Assistants API | Locked to OpenAI; no external AI composability |
-| Zapier / Make.com | Not AI-native; no ML model orchestration |
-| AWS Step Functions | Generic infrastructure; no AI intelligence; vendor lock-in |
+| Solution               | Limitations vs. C-SWON                                     |
+| ---------------------- | ---------------------------------------------------------- |
+| LangChain / LlamaIndex | Centralised; no incentivised optimisation; manual routing  |
+| OpenAI Assistants API  | Locked to OpenAI; no external AI composability             |
+| Zapier / Make.com      | Not AI-native; no ML model orchestration                   |
+| AWS Step Functions     | Generic infrastructure; no AI intelligence; vendor lock-in |
 
 ### Why Bittensor Is Ideal
 
@@ -946,12 +937,12 @@ Each new subnet that joins Bittensor *increases* the orchestration surface area 
 
 ### Development Phases
 
-| Phase | Timeline | Target |
-|-------|----------|--------|
-| 1 — Bootstrap | Months 1–6 | 30–50 miners, 5–10 validators, 1K+ workflows/day; testnet, mock execution |
-| 2 — Developer Adoption | Months 6–12 | 10+ apps, 10K+ workflows/day; mainnet, live sandbox |
-| 3 — Revenue Model | Months 12–24 | Gateway fee launch; ~$540K/month at 100K workflows/day |
-| 4 — Ecosystem Standard | 24+ months | Trustless fee R&D; BERTScore quality upgrade; Bittensor API gateway integration |
+| Phase                   | Timeline      | Target                                                                          |
+| ----------------------- | ------------- | ------------------------------------------------------------------------------- |
+| 1 — Bootstrap          | Months 1–6   | 30–50 miners, 5–10 validators, 1K+ workflows/day; testnet, mock execution     |
+| 2 — Developer Adoption | Months 6–12  | 10+ apps, 10K+ workflows/day; mainnet, live sandbox                             |
+| 3 — Revenue Model      | Months 12–24 | Gateway fee launch; ~$540K/month at 100K workflows/day                          |
+| 4 — Ecosystem Standard | 24+ months    | Trustless fee R&D; BERTScore quality upgrade; Bittensor API gateway integration |
 
 ---
 
@@ -979,12 +970,12 @@ C-SWON's primary users are **agent platform builders** — teams building on Tar
 
 ### Early Participation Incentives
 
-| Stakeholder | Incentive | Mechanism |
-|-------------|-----------|-----------|
-| Miners (first 50) | 3× query frequency for 6 months + $500–$1K GPU credits + $50K grants | Validator selection logic + off-chain grants |
-| Validators (first 10) | Owner stakes up to 1K TAO Alpha equivalent + $20K benchmark grants | Manual on-chain Alpha transfer (auditable) |
-| Developers | First 10K workflows free per project + $500–$2K migration bounty | Gateway policy + off-chain grants |
-| Subnet Partners | 5% traffic revenue share from gateway fees + $10K co-marketing | Gateway distribution + agreements |
+| Stakeholder           | Incentive                                                              | Mechanism                                    |
+| --------------------- | ---------------------------------------------------------------------- | -------------------------------------------- |
+| Miners (first 50)     | 3× query frequency for 6 months + $500–$1K GPU credits + $50K grants | Validator selection logic + off-chain grants |
+| Validators (first 10) | Owner stakes up to 1K TAO Alpha equivalent + $20K benchmark grants     | Manual on-chain Alpha transfer (auditable)   |
+| Developers            | First 10K workflows free per project + $500–$2K migration bounty      | Gateway policy + off-chain grants            |
+| Subnet Partners       | 5% traffic revenue share from gateway fees + $10K co-marketing         | Gateway distribution + agreements            |
 
 ---
 
@@ -992,19 +983,18 @@ C-SWON's primary users are **agent platform builders** — teams building on Tar
 
 The following items are intentionally deferred from v1 to keep the MVP honest and buildable on testnet. They are not design failures — they are explicit decisions.
 
-| Limitation | v1 Approach | Upgrade Path |
-|------------|-------------|--------------|
-| No on-chain execution receipts | Off-chain logs + Yuma consensus | Sub-subnet with execution receipts (Phase 4) |
-| No protocol-level fee collection | Gateway-level fee collection (centralised) | Trustless billing module if Subtensor adds EVM (Phase 4) |
-| ROUGE-L only for RAG quality | Deterministic, reproducible | Local BERTScore or embedding similarity (v2, no external calls) |
-| Manual Execution Support Pool | Owner transfers each tempo | Multi-sig governance contract (Phase 4) |
-| No on-chain slashing | Economic + governance penalties only | Slashing if added to Bittensor protocol |
-| Social scoring upgrade protocol | ≥67% stake vote + 2-tempo notice | Automated via governance module (Phase 3+) |
-| Parallel DAG semantics undefined | Sequential-only spec in v1 | Fixed in Section 3.2: parallel tiers, per-node DataRef failure scoping |
-| Planned retries penalised | Error handling disincentivised | Fixed in Section 2.2: only unplanned_retries scored |
-| axon.info.version type mismatch | SCORING_VERSION silently broken | Fixed in Section 4.5: __spec_version__ int + description string |
-| Buggy benchmark task stuck at 0 | Dead weight in scoring pool | Fixed in Section 4.7: quarantine + auto-remove lifecycle |
-
+| Limitation                       | v1 Approach                                | Upgrade Path                                                           |
+| -------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------- |
+| No on-chain execution receipts   | Off-chain logs + Yuma consensus            | Sub-subnet with execution receipts (Phase 4)                           |
+| No protocol-level fee collection | Gateway-level fee collection (centralised) | Trustless billing module if Subtensor adds EVM (Phase 4)               |
+| ROUGE-L only for RAG quality     | Deterministic, reproducible                | Local BERTScore or embedding similarity (v2, no external calls)        |
+| Manual Execution Support Pool    | Owner transfers each tempo                 | Multi-sig governance contract (Phase 4)                                |
+| No on-chain slashing             | Economic + governance penalties only       | Slashing if added to Bittensor protocol                                |
+| Social scoring upgrade protocol  | ≥67% stake vote + 2-tempo notice          | Automated via governance module (Phase 3+)                             |
+| Parallel DAG semantics undefined | Sequential-only spec in v1                 | Fixed in Section 3.2: parallel tiers, per-node DataRef failure scoping |
+| Planned retries penalised        | Error handling disincentivised             | Fixed in Section 2.2: only unplanned_retries scored                    |
+| axon.info.version type mismatch  | SCORING_VERSION silently broken            | Fixed in Section 4.5:__spec_version__ int + description string   |
+| Buggy benchmark task stuck at 0  | Dead weight in scoring pool                | Fixed in Section 4.7: quarantine + auto-remove lifecycle               |
 
 ---
 
@@ -1018,25 +1008,79 @@ The following items are intentionally deferred from v1 to keep the MVP honest an
 
 ```
 C-SWON/
-├── neurons/
-│   ├── miner.py         # Miner entry point
-│   └── validator.py     # Validator entry point
+├── benchmarks/
+│   └── v1.json
+├── contrib/
+│   ├── CODE_REVIEW_DOCS.md
+│   ├── CONTRIBUTING.md
+│   ├── DEVELOPMENT_WORKFLOW.md
+│   └── STYLE.md
 ├── cswon/
-│   ├── protocol.py      # WorkflowSynapse definition
-│   ├── scoring.py       # Composite scoring formula (SCORING_VERSION pinned here)
-│   ├── executor.py      # Docker sandbox + DataRef resolver
-│   └── benchmarks/
-│       └── v1.json      # Benchmark task dataset (versioned) — MUST be populated before testnet launch;
-│                            #   minimum 10 tasks for demo; full 50 required before mainnet
-├── validator/
-│   ├── config.py        # EXEC_SUPPORT_N_MIN, WARMUP_TASK_THRESHOLD, etc.
-│   ├── weight_setter.py # Tempo-aligned set_weights() call
-│   ├── scoring.py       # get_miner_weight() with warmup scale
-│   ├── miner_selection.py  # 3× query boost for early miners
-│   └── query_loop.py    # Async query loop (QUERY_TIMEOUT_S = 9)
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── dummy.py
+│   │   └── get_query_axons.py
+│   ├── base/
+│   │   ├── utils/
+│   │   │   ├── __init__.py
+│   │   │   └── weight_utils.py
+│   │   ├── __init__.py
+│   │   ├── miner.py
+│   │   ├── neuron.py
+│   │   └── validator.py
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   ├── logging.py
+│   │   ├── misc.py
+│   │   └── uids.py
+│   ├── validator/
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   ├── executor.py
+│   │   ├── forward.py
+│   │   ├── miner_selection.py
+│   │   ├── query_loop.py
+│   │   ├── reward.py
+│   │   └── weight_setter.py
+│   ├── __init__.py
+│   ├── mock.py
+│   ├── protocol.py
+│   └── subnet_links.py
+├── docs/
+│   ├── stream_tutorial/
+│   │   ├── client.py
+│   │   ├── config.py
+│   │   ├── miner.py
+│   │   ├── protocol.py
+│   │   └── README.md
+│   ├── running_on_mainnet.md
+│   ├── running_on_staging.md
+│   └── running_on_testnet.md
+├── neurons/
+│   ├── __init__.py
+│   ├── miner.py
+│   └── validator.py
+├── scripts/
+│   ├── check_compatibility.sh
+│   ├── check_requirements_changes.sh
+│   └── install_staging.sh
+├── tests/
+│   ├── __init__.py
+│   ├── helpers.py
+│   ├── test_executor.py
+│   ├── test_mock.py
+│   ├── test_protocol.py
+│   ├── test_scoring.py
+│   └── test_template_validator.py
+├── verify/
+│   ├── generate.py
+│   └── verify.py
+├── LICENSE
+├── min_compute.yml
+├── README.md
 ├── requirements.txt
-├── setup.py
-└── README.md
+└── setup.py
 ```
 
 ---
@@ -1088,6 +1132,7 @@ btcli subnet metagraph --netuid <netuid>
 ```
 
 **Expected behaviour:**
+
 - Immediately after registration: `trust = 0`, `emission = 0`. This is normal.
 - After first few tempos: `incentive` and `emission` will begin to appear once
   validators query and score your workflows.
@@ -1134,6 +1179,7 @@ btcli subnet metagraph --netuid <netuid>
 ```
 
 **Expected behaviour:**
+
 - `vtrust = 0.0` for first 5–10 tempos. This is expected (see Section 4.10).
 - If vtrust is still 0 after tempo 10: check logs for `CommittingWeightsTooFast`
   or run `btcli subnet metagraph --netuid <netuid>` and inspect your UID row.
@@ -1142,14 +1188,13 @@ btcli subnet metagraph --netuid <netuid>
 
 ### Common Errors
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `CommittingWeightsTooFast` | Submitting weights more than once per tempo | Check `last_set_block` logic in `weight_setter.py` |
-| `Axon not reachable` | Port not open externally | Open port 8091/8092 in firewall; confirm with `curl http://<your_ip>:8091/` |
-| `vtrust = 0.0` after 10 tempos | Weights not being accepted | Check `set_weights()` return value; ensure UID is not in `immunity_period` |
-| `CSWON_MOCK_EXEC missing` | Env var not set | `export CSWON_MOCK_EXEC=true` before running validator |
-| Docker permission denied | Docker daemon not accessible | Run `sudo usermod -aG docker $USER && newgrp docker` |
-
+| Error                            | Cause                                       | Fix                                                                            |
+| -------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
+| `CommittingWeightsTooFast`     | Submitting weights more than once per tempo | Check `last_set_block` logic in `weight_setter.py`                         |
+| `Axon not reachable`           | Port not open externally                    | Open port 8091/8092 in firewall; confirm with `curl http://<your_ip>:8091/`  |
+| `vtrust = 0.0` after 10 tempos | Weights not being accepted                  | Check `set_weights()` return value; ensure UID is not in `immunity_period` |
+| `CSWON_MOCK_EXEC missing`      | Env var not set                             | `export CSWON_MOCK_EXEC=true` before running validator                       |
+| Docker permission denied         | Docker daemon not accessible                | Run `sudo usermod -aG docker $USER && newgrp docker`                         |
 
 ## Conclusion
 
