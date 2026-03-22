@@ -54,10 +54,35 @@ class BaseMinerNeuron(BaseNeuron):
                 "You are allowing non-registered entities to send requests to your miner. This is a security risk."
             )
         # The axon handles request processing, allowing validators to send this miner requests.
-        self.axon = bt.axon(
-            wallet=self.wallet,
-            config=self.config() if callable(self.config) else self.config,
-        )
+        # Broadcast scoring version in axon metadata (readme §4.5)
+        from cswon.validator.config import SCORING_VERSION, __spec_version__ as CSWON_SPEC_VERSION
+        try:
+            self.axon = bt.axon(
+                wallet=self.wallet,
+                config=self.config() if callable(self.config) else self.config,
+                info=bt.AxonInfo(
+                    version=CSWON_SPEC_VERSION,
+                    ip="0.0.0.0",
+                    port=0,
+                    ip_type=4,
+                    placeholder1=0,
+                    placeholder2=0,
+                    protocol=4,
+                    hotkey=self.wallet.hotkey.ss58_address,
+                    coldkey=self.wallet.coldkeypub.ss58_address,
+                ),
+            )
+            try:
+                self.axon.info.description = f"cswon-scoring:{SCORING_VERSION}"
+            except AttributeError:
+                pass  # older SDK — description field not available
+        except TypeError:
+            # Fallback for SDKs that don't support info= parameter
+            self.axon = bt.axon(
+                wallet=self.wallet,
+                config=self.config() if callable(self.config) else self.config,
+            )
+
 
         # Attach determiners which functions are called when servicing a request.
         bt.logging.info(f"Attaching forward function to miner axon.")

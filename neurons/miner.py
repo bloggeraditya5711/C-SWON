@@ -33,6 +33,7 @@ import cswon
 from cswon.protocol import WorkflowSynapse
 from cswon.base.miner import BaseMinerNeuron
 from cswon.validator.config import SCORING_VERSION
+from cswon.miner.subnet_profiler import SubnetProfiler
 
 
 class Miner(BaseMinerNeuron):
@@ -45,6 +46,8 @@ class Miner(BaseMinerNeuron):
 
     def __init__(self, config=None):
         super(Miner, self).__init__(config=config)
+        # Subnet profiler: tracks historical cost/latency per partner subnet (readme §3.6)
+        self.profiler = SubnetProfiler()
         bt.logging.info("C-SWON Miner initialised")
 
     async def forward(
@@ -66,8 +69,14 @@ class Miner(BaseMinerNeuron):
             f"Received task: {synapse.task_id} type={synapse.task_type}"
         )
 
-        # Build workflow plan based on task type and available tools
-        workflow_plan = self._design_workflow(synapse)
+        # Refresh subnet profiles every 100 blocks (readme §3.6)
+        self.profiler.refresh(self.metagraph, self.block)
+
+        # Enrich available_tools with locally observed history before workflow design
+        enriched_tools = self.profiler.enrich_tools(synapse.available_tools or {})
+
+        # Build workflow plan based on task type and enriched tool profiles
+        workflow_plan = self._design_workflow(synapse, enriched_tools)
 
         # Populate miner response fields
         synapse.miner_uid = self.uid
@@ -86,15 +95,15 @@ class Miner(BaseMinerNeuron):
 
         return synapse
 
-    def _design_workflow(self, synapse: WorkflowSynapse) -> dict:
+    def _design_workflow(self, synapse: WorkflowSynapse, enriched_tools: dict = None) -> dict:
         """
-        Design a workflow DAG based on task type and available tools.
+        Design a workflow DAG based on task type and enriched tool profiles.
 
         This is the core miner intelligence — a simple heuristic planner
         that selects subnets based on task requirements and builds sequential
         or parallel DAGs.
         """
-        available_tools = synapse.available_tools or {}
+        available_tools = enriched_tools if enriched_tools is not None else (synapse.available_tools or {})
         constraints = synapse.constraints or {}
         allowed_subnets = constraints.get("allowed_subnets", list(available_tools.keys()))
         task_type = synapse.task_type

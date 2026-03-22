@@ -35,6 +35,11 @@ from cswon.base.utils.weight_utils import (
 )
 from cswon.mock import MockDendrite
 from cswon.utils.config import add_validator_args
+from cswon.validator import weight_setter as ws
+from cswon.validator.config import (
+    SCORING_VERSION,
+    __spec_version__ as CSWON_SPEC_VERSION,
+)
 
 
 class BaseValidatorNeuron(BaseNeuron):
@@ -85,11 +90,39 @@ class BaseValidatorNeuron(BaseNeuron):
         self.lock = asyncio.Lock()
 
     def serve_axon(self):
-        """Serve axon to enable external connections."""
+        """Serve axon to enable external connections.
 
+        Broadcasts SCORING_VERSION via axon.info per readme §4.5:
+          - version (int) = __spec_version__
+          - description (str) = "cswon-scoring:<SCORING_VERSION>"
+        """
         bt.logging.info("serving ip to chain...")
         try:
-            self.axon = bt.axon(wallet=self.wallet, config=self.config)
+            # Broadcast scoring version in axon metadata (readme §4.5)
+            try:
+                self.axon = bt.axon(
+                    wallet=self.wallet,
+                    config=self.config,
+                    info=bt.AxonInfo(
+                        version=CSWON_SPEC_VERSION,
+                        ip="0.0.0.0",
+                        port=0,
+                        ip_type=4,
+                        placeholder1=0,
+                        placeholder2=0,
+                        protocol=4,
+                        hotkey=self.wallet.hotkey.ss58_address,
+                        coldkey=self.wallet.coldkeypub.ss58_address,
+                    ),
+                )
+                # Store description separately in the axon's info if SDK supports it
+                try:
+                    self.axon.info.description = f"cswon-scoring:{SCORING_VERSION}"
+                except AttributeError:
+                    pass  # older SDK — description field not available
+            except TypeError:
+                # Fallback for SDKs that don't support info= parameter
+                self.axon = bt.axon(wallet=self.wallet, config=self.config)
 
             try:
                 self.subtensor.serve_axon(
@@ -97,7 +130,9 @@ class BaseValidatorNeuron(BaseNeuron):
                     axon=self.axon,
                 )
                 bt.logging.info(
-                    f"Running validator {self.axon} on network: {self.config.subtensor.chain_endpoint} with netuid: {self.config.netuid}"
+                    f"Running validator {self.axon} on network: "
+                    f"{self.config.subtensor.chain_endpoint} with netuid: {self.config.netuid} "
+                    f"(scoring_version={SCORING_VERSION})"
                 )
             except Exception as e:
                 bt.logging.error(f"Failed to serve Axon with exception: {e}")
@@ -221,67 +256,77 @@ class BaseValidatorNeuron(BaseNeuron):
 
     def set_weights(self):
         """
-        Sets the validator weights to the metagraph hotkeys based on the scores it has received from the miners. The weights determine the trust and incentive level the validator assigns to miner nodes on the network.
+        Submit weights once per tempo using the spec-compliant pipeline (readme §4.1, §4.8):
+          1. Fetch normalised weights from ScoreAggregator (rolling 100-task window, equal weight).
+          2. Apply 15% per-miner cap and redistribute excess.
+          3. Submit via subtensor.set_weights() with wait_for_inclusion=False.
+
+        Falls back to the raw self.scores array if score_aggregator is not available
+        (e.g. during the very first tempo before any scores have been recorded).
         """
+        miner_uids = [
+            uid for uid in range(int(self.metagraph.n))
+            if not self.metagraph.validator_permit[uid]
+        ]
 
-        # Check if self.scores contains any NaN values and log a warning if it does.
-        if np.isnan(self.scores).any():
-            bt.logging.warning(
-                f"Scores contain NaN values. This may be due to a lack of responses from miners, or a bug in your reward functions."
+        if hasattr(self, "score_aggregator") and miner_uids:
+            # ── Spec-compliant path: rolling window + 15% cap ─────────────────
+            uids, weights = ws.compute_weights(
+                score_aggregator=self.score_aggregator,
+                miner_uids=miner_uids,
             )
+        else:
+            # ── Fallback path: L1-normalise self.scores ───────────────────────
+            bt.logging.warning(
+                "score_aggregator not ready; falling back to L1-norm self.scores"
+            )
+            if np.isnan(self.scores).any():
+                bt.logging.warning("Scores contain NaN — replacing with 0.")
+            raw = np.nan_to_num(self.scores, nan=0.0)
+            norm = np.linalg.norm(raw, ord=1)
+            if norm == 0:
+                norm = 1.0
+            normalised = raw / norm
+            uids = list(range(len(normalised)))
+            weights = normalised.tolist()
 
-        # Calculate the average reward for each uid across non-zero values.
-        # Replace any NaN values with 0.
-        # Compute the norm of the scores
-        norm = np.linalg.norm(self.scores, ord=1, axis=0, keepdims=True)
+        if not uids:
+            bt.logging.warning("No miner UIDs to set weights for; skipping.")
+            return
 
-        # Check if the norm is zero or contains NaN values
-        if np.any(norm == 0) or np.isnan(norm).any():
-            norm = np.ones_like(norm)  # Avoid division by zero or NaN
+        bt.logging.debug(f"set_weights uids={uids} weights={weights}")
 
-        # Compute raw_weights safely
-        raw_weights = self.scores / norm
-
-        bt.logging.debug("raw_weights", raw_weights)
-        bt.logging.debug("raw_weight_uids", str(self.metagraph.uids.tolist()))
-        # Process the raw weights to final_weights via subtensor limitations.
-        (
-            processed_weight_uids,
-            processed_weights,
-        ) = process_weights_for_netuid(
-            uids=self.metagraph.uids,
-            weights=raw_weights,
-            netuid=self.config.netuid,
+        ws.set_weights_on_chain(
             subtensor=self.subtensor,
-            metagraph=self.metagraph,
-        )
-        bt.logging.debug("processed_weights", processed_weights)
-        bt.logging.debug("processed_weight_uids", processed_weight_uids)
-
-        # Convert to uint16 weights and uids.
-        (
-            uint_uids,
-            uint_weights,
-        ) = convert_weights_and_uids_for_emit(
-            uids=processed_weight_uids, weights=processed_weights
-        )
-        bt.logging.debug("uint_weights", uint_weights)
-        bt.logging.debug("uint_uids", uint_uids)
-
-        # Set the weights on chain via our subtensor connection.
-        result, msg = self.subtensor.set_weights(
             wallet=self.wallet,
             netuid=self.config.netuid,
-            uids=uint_uids,
-            weights=uint_weights,
-            wait_for_finalization=False,
-            wait_for_inclusion=False,
-            version_key=self.spec_version,
+            miner_uids=uids,
+            normalised_weights=weights,
+            spec_version=CSWON_SPEC_VERSION,
         )
-        if result is True:
-            bt.logging.info("set_weights on chain successfully!")
-        else:
-            bt.logging.error("set_weights failed", msg)
+
+    def should_set_weights(self) -> bool:
+        """
+        Check if weights should be set this block (readme §4.1).
+
+        Uses dual-condition guard from weight_setter.py:
+          1. At least one full tempo has elapsed since last submission.
+          2. WeightsRateLimit on-chain is respected.
+        """
+        if self.step == 0:
+            return False
+        if self.neuron_type == "MinerNeuron":
+            return False
+        if self.config.neuron.disable_set_weights:
+            return False
+
+        last_update = int(self.metagraph.last_update[self.uid])
+        return ws.should_set_weights(
+            current_block=self.block,
+            last_set_block=last_update,
+            subtensor=self.subtensor,
+            netuid=self.config.netuid,
+        )
 
     def resync_metagraph(self):
         """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph."""

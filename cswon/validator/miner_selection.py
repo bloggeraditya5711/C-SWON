@@ -70,19 +70,26 @@ def select_miners_for_query(
     k: int = 10,
     exclude: Optional[List[int]] = None,
     registration_blocks: Optional[dict] = None,
+    min_stake_tao: float = 1.0,
 ) -> np.ndarray:
     """
-    Select miners to query with early participation boost (readme §3.5).
+    Select miners to query with early participation boost (readme §3.5)
+    and minimum active stake enforcement (readme §3.1).
 
     The first 50 registered miners (by registration order) get 3× query
     frequency — their selection probability is tripled. This is implemented
     by giving them 3× weight in the random sampling.
+
+    Miners below min_stake_tao active stake are excluded, EXCEPT miners
+    still within their immunity period (approximated as uid < EARLY_MINER_LIMIT)
+    to avoid penalising brand-new participants before they can acquire stake.
 
     Args:
         metagraph: The metagraph object.
         k: Number of miners to select.
         exclude: UIDs to exclude from selection.
         registration_blocks: Optional dict mapping uid -> registration block.
+        min_stake_tao: Minimum active TAO stake required (readme §3.1). Default 1.0.
 
     Returns:
         np.ndarray: Selected miner UIDs.
@@ -105,22 +112,26 @@ def select_miners_for_query(
         if metagraph.validator_permit[uid] and metagraph.S[uid] > 1024:
             continue
 
+        # Minimum stake enforcement (readme §3.1).
+        # Exception: early miners (uid < EARLY_MINER_LIMIT) approximate the immunity
+        # period — they are included regardless of stake so new participants aren't
+        # starved of queries before they can acquire the required stake.
+        is_early_miner = uid < EARLY_MINER_LIMIT
+        miner_stake = float(metagraph.S[uid])
+        if miner_stake < min_stake_tao and not is_early_miner:
+            bt.logging.trace(
+                f"Skipping miner uid={uid}: stake={miner_stake:.3f} < "
+                f"min_stake_tao={min_stake_tao}"
+            )
+            continue
+
         candidates.append(uid)
 
         # Early miner boost: first EARLY_MINER_LIMIT miners get higher selection weight
-        if registration_blocks and uid in registration_blocks:
-            # Sort all UIDs by registration block to determine early status
-            # For simplicity, use UID order as a proxy — lower UIDs registered earlier
-            if uid < EARLY_MINER_LIMIT:
-                weights.append(float(EARLY_MINER_BOOST_MULTIPLIER))
-            else:
-                weights.append(1.0)
+        if uid < EARLY_MINER_LIMIT:
+            weights.append(float(EARLY_MINER_BOOST_MULTIPLIER))
         else:
-            # Default: use UID as proxy for registration order
-            if uid < EARLY_MINER_LIMIT:
-                weights.append(float(EARLY_MINER_BOOST_MULTIPLIER))
-            else:
-                weights.append(1.0)
+            weights.append(1.0)
 
     if not candidates:
         return np.array([], dtype=int)
@@ -135,3 +146,4 @@ def select_miners_for_query(
         candidates, size=k, replace=False, p=probabilities
     )
     return selected
+
